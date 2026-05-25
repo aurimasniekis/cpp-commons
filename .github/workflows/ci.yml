@@ -1,0 +1,227 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_GENERATOR: Ninja
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / ${{ matrix.compiler }} / ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Debug, Release]
+        compiler: [default]
+        include:
+          - os: ubuntu-latest
+            compiler: default
+            build_type: Debug
+            cc: gcc-14
+            cxx: g++-14
+          - os: ubuntu-latest
+            compiler: default
+            build_type: Release
+            cc: gcc-14
+            cxx: g++-14
+          - os: ubuntu-latest
+            compiler: gcc
+            build_type: Debug
+            cc: gcc-14
+            cxx: g++-14
+          - os: ubuntu-latest
+            compiler: clang
+            build_type: Debug
+            cc: clang-20
+            cxx: clang++-20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Install GCC 14
+        if: runner.os == 'Linux' && matrix.cxx == 'g++-14'
+        run: sudo apt-get install -y gcc-14 g++-14
+
+      - name: Install Clang 20
+        if: matrix.compiler == 'clang'
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          sudo add-apt-repository -y "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main"
+          sudo apt-get update
+          sudo apt-get install -y clang-20
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v5
+        with:
+          path: build/_deps
+          key: deps-${{ matrix.os }}-${{ matrix.compiler }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            deps-${{ matrix.os }}-${{ matrix.compiler }}-
+
+      - name: Build + test
+        env:
+          CC:  ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          BUILD_TYPE: ${{ matrix.build_type }}
+        run: make test
+
+      - name: Run examples
+        run: |
+          set -euo pipefail
+          failures=()
+          for ex in build/examples/commons_*; do
+            if [ -x "$ex" ] && [ ! -d "$ex" ]; then
+              name="$(basename "$ex")"
+              echo "=== $name ==="
+              # Capture stdout silently but always show stderr; preserve exit
+              # code so a demo that crashes or exits non-zero fails the step.
+              if ! "$ex" >/dev/null; then
+                echo "FAIL: $name (exit $?)"
+                failures+=("$name")
+              fi
+            fi
+          done
+          if [ ${#failures[@]} -ne 0 ]; then
+            echo "Examples that failed: ${failures[*]}"
+            exit 1
+          fi
+
+  integrations:
+    name: Integrations (nlohmann/json forced ON)
+    runs-on: ubuntu-latest
+    env:
+      CC:  gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build gcc-14 g++-14
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v5
+        with:
+          path: build-integrations/_deps
+          key: deps-integrations-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      # Forces COMMONS_WITH_NLOHMANN_JSON=ON (fetching nlohmann/json) and runs
+      # the full suite, including the conditional test_json + json example.
+      - name: Configure + build + test with integration on
+        run: make integrations
+
+      - name: Run integration example
+        run: build-integrations/examples/commons_json_integration
+
+  consumer:
+    name: Downstream FetchContent consumer
+    runs-on: ubuntu-latest
+    env:
+      CC:  gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build gcc-14 g++-14
+
+      # Standalone downstream project — no make target wraps this. Run cmake
+      # directly, with FETCHCONTENT_SOURCE_DIR_CPP-COMMONS pointing at the
+      # in-tree checkout so the snippet is exercised before any release tag
+      # exists. See examples/consumers/fetch_content/README.md.
+      - name: Configure (override source dir to in-tree checkout)
+        run: |
+          cmake -S examples/consumers/fetch_content \
+                -B /tmp/commons-consumer-build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DFETCHCONTENT_SOURCE_DIR_CPP-COMMONS=$PWD
+
+      - name: Build
+        run: cmake --build /tmp/commons-consumer-build --parallel
+
+      - name: Run
+        run: /tmp/commons-consumer-build/consumer
+
+  sanitizers:
+    name: Sanitizers (ASan + UBSan)
+    runs-on: ubuntu-latest
+    env:
+      CC:  gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build gcc-14 g++-14
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v5
+        with:
+          path: build-san/_deps
+          key: deps-san-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Configure + build + test under sanitizers
+        env:
+          ASAN_OPTIONS:  detect_leaks=1:check_initialization_order=1:strict_init_order=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: make sanitize
+
+  clang-tidy:
+    name: clang-tidy
+    # macOS runner: Apple Clang + libc++ ship a working <expected> out of the
+    # box. The Linux path forced clang-tidy to find the libstdc++ matching
+    # the configured g++, and the two stdlibs disagreed on which C++23
+    # features are exposed — a portability mess we don't need to chase.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install tools
+        run: brew install ninja llvm
+
+      - name: Put Homebrew clang-tidy on PATH
+        run: echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v5
+        with:
+          path: build-tidy/_deps
+          key: deps-tidy-macos-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Configure + build (runs clang-tidy)
+        run: make tidy
+
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install clang-format
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          sudo add-apt-repository -y "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main"
+          sudo apt-get update
+          sudo apt-get install -y clang-format-22
+          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-22 100
+
+      - name: Check formatting
+        run: make format-check

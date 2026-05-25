@@ -1,0 +1,10 @@
+option('tests',    type: 'boolean', value: false, description: 'Build commons tests')
+option('examples', type: 'boolean', value: false, description: 'Build commons examples')
+option('json',     type: 'boolean', value: false, description: 'Force-enable nlohmann/json integration (fetches the dependency)')
+
+# Override seams for comms::Prioritized's sentinel values. Empty = keep the C++
+# header default (numeric_limits-based, with no Meson literal); a non-empty value
+# is force-defined as the matching macro for this project's own targets.
+option('prioritized_highest_precedence', type: 'string', value: '', description: 'Override comms::Prioritized::HIGHEST_PRECEDENCE')
+option('prioritized_lowest_precedence',  type: 'string', value: '', description: 'Override comms::Prioritized::LOWEST_PRECEDENCE')
+option('prioritized_default_priority',   type: 'string', value: '', description: 'Override comms::Prioritized::DEFAULT_PRIORITY')

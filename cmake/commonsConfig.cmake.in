@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+set(COMMONS_WITH_NLOHMANN_JSON @COMMONS_WITH_NLOHMANN_JSON@)
+if(COMMONS_WITH_NLOHMANN_JSON)
+    find_dependency(nlohmann_json 3.12.0)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/commonsTargets.cmake")
+
+check_required_components(commons)

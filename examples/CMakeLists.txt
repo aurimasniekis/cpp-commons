@@ -1,0 +1,17 @@
+function(commons_add_example target src)
+    add_executable(${target} ${src})
+    target_link_libraries(${target} PRIVATE commons::commons)
+    commons_set_warnings(${target} PRIVATE)
+    commons_enable_sanitizers(${target})
+endfunction()
+
+commons_add_example(commons_hello hello.cpp)
+commons_add_example(commons_color color.cpp)
+commons_add_example(commons_icon icon.cpp)
+commons_add_example(commons_display_info display_info.cpp)
+commons_add_example(commons_flag flag.cpp)
+commons_add_example(commons_prioritized prioritized.cpp)
+
+if(COMMONS_WITH_NLOHMANN_JSON AND TARGET nlohmann_json::nlohmann_json)
+    commons_add_example(commons_json_integration json_integration.cpp)
+endif()

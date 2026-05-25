@@ -1,0 +1,36 @@
+# Doxygen configuration template for commons.
+# Variables wrapped in @...@ are filled in by CMake's configure_file().
+
+PROJECT_NAME           = "commons"
+PROJECT_NUMBER         = "@PROJECT_VERSION@"
+PROJECT_BRIEF          = "@PROJECT_DESCRIPTION@"
+OUTPUT_DIRECTORY       = @COMMONS_DOXYGEN_OUTPUT_DIR@
+
+INPUT                  = @CMAKE_CURRENT_SOURCE_DIR@/include @CMAKE_CURRENT_SOURCE_DIR@/README.md
+USE_MDFILE_AS_MAINPAGE = @CMAKE_CURRENT_SOURCE_DIR@/README.md
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hpp
+
+EXTRACT_ALL            = NO
+EXTRACT_STATIC         = YES
+HIDE_UNDOC_MEMBERS     = YES
+HIDE_UNDOC_CLASSES     = YES
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+
+WARN_IF_UNDOCUMENTED   = YES
+WARN_AS_ERROR          = NO
+
+JAVADOC_AUTOBRIEF      = YES
+
+QUIET                  = YES
+ALPHABETICAL_INDEX     = YES
+SHOW_NAMESPACES        = YES
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = COMMONS_WITH_NLOHMANN_JSON=1 \
+                         COMMONS_HAS_INT128=1
