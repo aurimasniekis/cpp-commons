@@ -93,7 +93,7 @@ include(FetchContent)
 FetchContent_Declare(
     commons
     URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.0.tar.gz
-    URL_HASH SHA256=PLACEHOLDER
+    URL_HASH SHA256=7bfe899c0c2f25fe18f2526473b9cd7aee917ab8dd8d93eec64ee87fecd00ede
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 

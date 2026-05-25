@@ -12,20 +12,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
 
-# Pin a published release tarball + its SHA256. Reproducible, no git required
-# at configure time, fastest to fetch on CI. To compute SHA256 yourself:
+# Pin the published release tarball + its SHA256. Reproducible, no git required
+# at configure time, fastest to fetch on CI. To recompute the SHA256 yourself:
 #
 #   curl -sL https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.0.tar.gz \
 #     | shasum -a 256
 #
-# (No URL_HASH below until a release tag exists — the CI consumer job overrides
-# the source dir with the in-tree checkout, so this snippet is exercised before
-# any tag is published. See README.md.)
+# (The CI consumer job overrides the source dir with the in-tree checkout, so
+# this snippet is also exercised without hitting the network. See README.md.)
 FetchContent_Declare(
         cpp-commons
-        GIT_REPOSITORY https://github.com/aurimasniekis/cpp-commons.git
-        GIT_TAG        v0.1.0
-        GIT_SHALLOW    TRUE
+        URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.0.tar.gz
+        URL_HASH SHA256=7bfe899c0c2f25fe18f2526473b9cd7aee917ab8dd8d93eec64ee87fecd00ede
 )
 
 # Local-validation tip: to test this snippet against an in-tree checkout,
