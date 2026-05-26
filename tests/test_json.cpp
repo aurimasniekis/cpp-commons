@@ -70,7 +70,38 @@ TEST(Json, U128Zero) {
 
 TEST(Json, I128InvalidStringThrows) {
     json j = "12x34";
-    EXPECT_THROW((void)j.get<comms::i128>(), std::invalid_argument);
+    EXPECT_THROW((void)j.get<comms::i128>(), nlohmann::json::other_error);
+}
+
+TEST(Json, I128SignRoundTrips) {
+    json j = "+42";
+    EXPECT_EQ(j.get<comms::i128>(), comms::i128{42});
+    json neg = "-42";
+    EXPECT_EQ(neg.get<comms::i128>(), -comms::i128{42});
+}
+
+// One past i128_max (2^127) must not be accepted on the non-negative path.
+TEST(Json, I128OverflowThrows) {
+    json j = "170141183460469231731687303715884105728";  // 2^127
+    EXPECT_THROW((void)j.get<comms::i128>(), nlohmann::json::other_error);
+}
+
+// One past u128_max (2^128) must be rejected rather than silently wrapping.
+TEST(Json, U128OverflowThrows) {
+    json j = "340282366920938463463374607431768211456";  // 2^128
+    EXPECT_THROW((void)j.get<comms::u128>(), nlohmann::json::other_error);
+}
+
+TEST(Json, I128NonStringThrows) {
+    json j = 42;  // a JSON number, not the expected decimal string
+    EXPECT_THROW((void)j.get<comms::i128>(), nlohmann::json::other_error);
+    EXPECT_THROW((void)j.get<comms::u128>(), nlohmann::json::other_error);
+}
+
+TEST(Json, I128EmptyAndSignOnlyThrow) {
+    EXPECT_THROW((void)json("").get<comms::i128>(), nlohmann::json::other_error);
+    EXPECT_THROW((void)json("-").get<comms::i128>(), nlohmann::json::other_error);
+    EXPECT_THROW((void)json("").get<comms::u128>(), nlohmann::json::other_error);
 }
 
 #endif  // COMMONS_HAS_INT128

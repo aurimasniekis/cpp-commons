@@ -53,9 +53,7 @@
 #include <concepts>
 #include <cstddef>
 #include <optional>
-#include <stdexcept>
 #include <string>
-#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -295,30 +293,91 @@ namespace detail {
     return negative ? "-" + digits : digits;
 }
 
-[[nodiscard]] inline u128 string_to_u128(std::string_view s) {
-    if (s.empty()) {
-        throw std::invalid_argument{"commons: empty string is not a u128"};
+// Parse a decimal JSON string into a u128, validating and range-checking as we
+// go. Plain numbers narrow through `long long` and lose precision above 2^64,
+// so the wire form is a string; every failure surfaces as a commons error (the
+// project analog of the rest of this file's `other_error::create(502, ...)`).
+template <typename BasicJsonType>
+[[nodiscard]] u128 json_to_u128(const BasicJsonType& j) {
+    if (!j.is_string()) {
+        throw ::nlohmann::detail::other_error::create(
+            502, "commons: u128 must be encoded as a JSON string", &j);
     }
-    u128 r = 0;
+    const auto& s = j.template get_ref<const std::string&>();
+    if (s.empty()) {
+        throw ::nlohmann::detail::other_error::create(502, "commons: u128 string is empty", &j);
+    }
+    constexpr u128 u128_max = ~static_cast<u128>(0);
+    u128 v = 0;
     for (const char c : s) {
         if (c < '0' || c > '9') {
-            throw std::invalid_argument{"commons: invalid digit in u128 string"};
+            throw ::nlohmann::detail::other_error::create(
+                502, "commons: non-digit character in u128 string", &j);
         }
-        r = r * 10 + static_cast<u128>(c - '0');
+        const auto d = static_cast<u128>(c - '0');
+        if (v > (u128_max - d) / 10) {
+            throw ::nlohmann::detail::other_error::create(
+                502, "commons: u128 string out of range", &j);
+        }
+        v = v * 10 + d;
     }
-    return r;
+    return v;
 }
 
-[[nodiscard]] inline i128 string_to_i128(std::string_view s) {
+// Parse a signed decimal JSON string into an i128. Accepts an optional leading
+// `+`/`-`; the magnitude is accumulated in unsigned space so `i128_min` (whose
+// positive counterpart does not fit in i128) round-trips without overflow.
+template <typename BasicJsonType>
+[[nodiscard]] i128 json_to_i128(const BasicJsonType& j) {
+    if (!j.is_string()) {
+        throw ::nlohmann::detail::other_error::create(
+            502, "commons: i128 must be encoded as a JSON string", &j);
+    }
+    const auto& s = j.template get_ref<const std::string&>();
     if (s.empty()) {
-        throw std::invalid_argument{"commons: empty string is not an i128"};
+        throw ::nlohmann::detail::other_error::create(502, "commons: i128 string is empty", &j);
     }
-    const bool negative = s.front() == '-';
-    if (negative || s.front() == '+') {
-        s.remove_prefix(1);
+    std::size_t i = 0;
+    bool negative = false;
+    if (s[0] == '-') {
+        negative = true;
+        i = 1;
+    } else if (s[0] == '+') {
+        i = 1;
     }
-    const u128 mag = string_to_u128(s);
-    return negative ? static_cast<i128>(~mag + 1) : static_cast<i128>(mag);
+    if (i == s.size()) {
+        throw ::nlohmann::detail::other_error::create(
+            502, "commons: i128 string has sign but no digits", &j);
+    }
+    // Permissible magnitudes: 0 .. 2^127     when negative (i128_min),
+    //                         0 .. 2^127 - 1 when non-negative.
+    constexpr u128 neg_mag_max = static_cast<u128>(1) << 127;
+    constexpr u128 pos_mag_max = neg_mag_max - 1;
+    u128 mag = 0;
+    for (; i < s.size(); ++i) {
+        const char c = s[i];
+        if (c < '0' || c > '9') {
+            throw ::nlohmann::detail::other_error::create(
+                502, "commons: non-digit character in i128 string", &j);
+        }
+        const auto d = static_cast<u128>(c - '0');
+        if (mag > (neg_mag_max - d) / 10) {
+            throw ::nlohmann::detail::other_error::create(
+                502, "commons: i128 string out of range", &j);
+        }
+        mag = mag * 10 + d;
+    }
+    if (!negative && mag > pos_mag_max) {
+        throw ::nlohmann::detail::other_error::create(502, "commons: i128 string out of range", &j);
+    }
+    if (negative) {
+        // Map magnitude → negative without signed overflow on i128_min (mag ==
+        // 2^127): v = -mag, computed as -(mag - 1) - 1.
+        const u128 mm1 = mag - 1;
+        const i128 partial = -static_cast<i128>(mm1);
+        return partial - 1;
+    }
+    return static_cast<i128>(mag);
 }
 
 }  // namespace detail
@@ -343,7 +402,7 @@ struct adl_serializer<::comms::i128> {
 
     template <typename BasicJsonType>
     static void from_json(const BasicJsonType& j, ::comms::i128& v) {
-        v = ::comms::detail::string_to_i128(j.template get<std::string>());
+        v = ::comms::detail::json_to_i128(j);
     }
 };
 
@@ -356,7 +415,7 @@ struct adl_serializer<::comms::u128> {
 
     template <typename BasicJsonType>
     static void from_json(const BasicJsonType& j, ::comms::u128& v) {
-        v = ::comms::detail::string_to_u128(j.template get<std::string>());
+        v = ::comms::detail::json_to_u128(j);
     }
 };
 
