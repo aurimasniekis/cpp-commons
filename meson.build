@@ -1,5 +1,5 @@
 project('commons', 'cpp',
-    version: '0.1.1',
+    version: '0.1.2',
     license: 'MIT',
     default_options: [
         'cpp_std=c++23',
