@@ -11,8 +11,8 @@ time, and the bytes are verified):
 ```cmake
 FetchContent_Declare(
     cpp-commons
-    URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.0.tar.gz
-    URL_HASH SHA256=7bfe899c0c2f25fe18f2526473b9cd7aee917ab8dd8d93eec64ee87fecd00ede
+    URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.1.tar.gz
+    URL_HASH SHA256=5389c09ab887c4d65083391ba9f913827126412f69131d79e0874a400975fff4
 )
 ```
 
