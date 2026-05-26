@@ -116,6 +116,23 @@ TEST(FlagSet, DeduplicatesByName) {
     EXPECT_EQ(s.size(), 1U);
 }
 
+TEST(FlagSet, OfFactoryInsertsPackInOrder) {
+    const auto s = FlagSet::of<Verbose, Ipv6, Decorated>();
+
+    std::vector<std::string_view> names;
+    for (const auto& f : s) {
+        names.push_back(f.name);
+    }
+    ASSERT_EQ(names.size(), 3U);
+    EXPECT_EQ(names[0], "verbose");
+    EXPECT_EQ(names[1], "ipv6");
+    EXPECT_EQ(names[2], "decorated");
+}
+
+TEST(FlagSet, OfFactoryEmptyPackYieldsEmptySet) {
+    EXPECT_TRUE(FlagSet::of<>().empty());
+}
+
 TEST(FlagSet, ContainsCountEraseClear) {
     FlagSet s;
     s.insert<Ipv6>();

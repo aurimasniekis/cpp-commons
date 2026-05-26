@@ -164,6 +164,15 @@ public:
         return true;
     }
 
+    /// Build a set from a flag type pack, inserting each in order. Lets call
+    /// sites stay terse: `FlagSet::of<Flag1, Flag2>()`.
+    template <AnyFlag... Fs>
+    [[nodiscard]] static FlagSet of() {
+        FlagSet s;
+        (s.insert<Fs>(), ...);
+        return s;
+    }
+
     template <AnyFlag F>
     [[nodiscard]] bool contains() const {
         return contains(F::name);
