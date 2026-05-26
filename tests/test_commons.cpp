@@ -22,10 +22,10 @@ TEST(Commons, UmbrellaExposesPublicApi) {
 }
 
 TEST(Commons, VersionConstants) {
-    EXPECT_EQ(comms::version, std::string_view{"0.1.2"});
+    EXPECT_EQ(comms::version, std::string_view{"0.1.3"});
     EXPECT_EQ(comms::version_major, 0);
     EXPECT_EQ(comms::version_minor, 1);
-    EXPECT_EQ(comms::version_patch, 2);
+    EXPECT_EQ(comms::version_patch, 3);
 }
 
 }  // namespace
