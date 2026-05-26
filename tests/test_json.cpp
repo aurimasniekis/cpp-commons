@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <optional>
 #include <string>
 
 namespace {
@@ -189,6 +190,37 @@ TEST(Json, ComplexIntRoundTrip) {
     const json j = n;
     EXPECT_EQ(j.dump(), "[3,-4]");
     EXPECT_EQ(j.get<comms::cs32>(), n);
+}
+
+// -- std::optional<T> --------------------------------------------------------
+// nullopt ⇄ JSON null; a value travels via the wrapped T's own serializer.
+
+TEST(Json, OptionalWithValueSerializesAsInnerValue) {
+    const std::optional<int> opt = 7;
+    const json j = opt;
+    EXPECT_TRUE(j.is_number());
+    EXPECT_EQ(j.dump(), "7");
+    EXPECT_EQ(j.get<std::optional<int>>(), opt);
+}
+
+TEST(Json, OptionalNulloptSerializesAsNull) {
+    const std::optional<int> opt = std::nullopt;
+    const json j = opt;
+    EXPECT_TRUE(j.is_null());
+    EXPECT_EQ(j.get<std::optional<int>>(), std::nullopt);
+}
+
+TEST(Json, OptionalNullJsonDeserializesToNullopt) {
+    const json j = nullptr;
+    EXPECT_FALSE(j.get<std::optional<std::string>>().has_value());
+}
+
+// The inner T reuses its own hooks — here a Commons type with a string mapping.
+TEST(Json, OptionalReusesInnerTypeHooks) {
+    const std::optional<comms::Color> opt = comms::Color::parse("#6366f1");
+    const json j = opt;
+    EXPECT_EQ(j.get<std::string>(), "#6366f1");
+    EXPECT_EQ(j.get<std::optional<comms::Color>>(), opt);
 }
 
 // -- Flag / FlagSet ----------------------------------------------------------

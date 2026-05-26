@@ -24,6 +24,7 @@
 ///   - `i128` / `u128` ⇄ JSON **decimal string**. Plain JSON numbers cannot
 ///     represent 128-bit integers without loss, so they travel as strings —
 ///     a genuinely useful integration rather than a silent narrowing.
+///   - `std::optional<T>` ⇄ the inner `T`'s JSON, with `nullopt` ⇄ JSON `null`.
 ///   - `WithPriority<T>` ⇄ JSON **object** `{"priority":N,"value":<T>}` and
 ///     `PrioritizedSet<T>` ⇄ JSON **array** in sorted order — both only when
 ///     `T` is itself json-serializable; the set's `from_json` additionally
@@ -51,6 +52,7 @@
 #include <complex>
 #include <concepts>
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -382,6 +384,35 @@ struct adl_serializer<std::complex<T>> {
     static void from_json(const BasicJsonType& j, std::complex<T>& c) {
         c.real(j.at(0).template get<T>());
         c.imag(j.at(1).template get<T>());
+    }
+};
+
+}  // namespace nlohmann
+
+// std::optional<T> lives in namespace `std`, so (like std::complex) ADL cannot
+// find a `to_json` / `from_json` for it in namespace `comms`. Specialize
+// nlohmann's serializer instead: `nullopt` round-trips as JSON `null`, and a
+// held value travels via the wrapped T's own serializer.
+namespace nlohmann {
+
+template <typename T>
+struct adl_serializer<std::optional<T>> {
+    template <typename BasicJsonType>
+    static void to_json(BasicJsonType& j, const std::optional<T>& opt) {
+        if (opt.has_value()) {
+            j = *opt;
+        } else {
+            j = nullptr;
+        }
+    }
+
+    template <typename BasicJsonType>
+    static void from_json(const BasicJsonType& j, std::optional<T>& opt) {
+        if (j.is_null()) {
+            opt = std::nullopt;
+        } else {
+            opt = j.template get<T>();
+        }
     }
 };
 
