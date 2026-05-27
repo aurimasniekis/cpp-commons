@@ -93,8 +93,8 @@ include(FetchContent)
 
 FetchContent_Declare(
     commons
-    URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.3.tar.gz
-    URL_HASH SHA256=<filled-in-after-tagging-v0.1.3>
+    URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.4.tar.gz
+    URL_HASH SHA256=<filled-in-after-tagging-v0.1.4>
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 

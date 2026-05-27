@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(commons
-    VERSION     0.1.3
+    VERSION     0.1.4
     DESCRIPTION "Header-only C++23 library of common/shared types for the C++ libraries"
     LANGUAGES   CXX
 )

@@ -155,7 +155,7 @@ Meson: `meson setup build-meson -Dtests=true -Dexamples=true && meson test -C bu
 - 4-space indent, 100-col, LLVM-based `.clang-format`. Includes regrouped:
   `<commons/...>` first.
 - C++23 required (`cxx_std_23`); `cmake_minimum_required(VERSION 3.25)`.
-- Version `0.1.3` is declared once in CMake `project()` and Meson `project()`.
+- Version `0.1.4` is declared once in CMake `project()` and Meson `project()`.
   `commons/version.hpp` is **generated** from `commons/version.hpp.in` by the
   build (into the build tree, not the source tree): it defines the
   `COMMONS_VERSION_MAJOR/MINOR/PATCH/STRING` macros and the `comms::version` /
