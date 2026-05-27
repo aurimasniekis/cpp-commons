@@ -44,7 +44,9 @@
 #include <commons/flag.hpp>
 #include <commons/icon.hpp>
 #include <commons/prioritized.hpp>
+#include <commons/semver.hpp>
 #include <commons/types.hpp>
+#include <commons/version_constraint.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -52,6 +54,7 @@
 #include <complex>
 #include <concepts>
 #include <cstddef>
+#include <exception>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -265,6 +268,40 @@ inline void from_json(const ::nlohmann::json& j, Hsv& c) {
     c.s = j.at("s").template get<f64>();
     c.v = j.at("v").template get<f64>();
     c.a = j.at("a").template get<f64>();
+}
+
+// SemVer ⇄ JSON version string -----------------------------------------------
+
+inline void to_json(::nlohmann::json& j, const SemVer& v) {
+    j = v.to_string();
+}
+
+inline void from_json(const ::nlohmann::json& j, SemVer& v) {
+    const auto str = j.template get<std::string>();
+    const auto parsed = SemVer::parse(str);
+    if (!parsed) {
+        throw ::nlohmann::detail::other_error::create(
+            502, "commons: '" + str + "' is not a valid semantic version", &j);
+    }
+    v = *parsed;
+}
+
+// VersionConstraint ⇄ JSON range string --------------------------------------
+// parse() throws std::invalid_argument on a malformed sub-version; rewrap it as
+// a commons JSON error to match the rest of this file.
+
+inline void to_json(::nlohmann::json& j, const VersionConstraint& v) {
+    j = v.raw();
+}
+
+inline void from_json(const ::nlohmann::json& j, VersionConstraint& v) {
+    const auto str = j.template get<std::string>();
+    try {
+        v = VersionConstraint::parse(str);
+    } catch (const std::exception&) {
+        throw ::nlohmann::detail::other_error::create(
+            502, "commons: '" + str + "' is not a valid version constraint", &j);
+    }
 }
 
 #if defined(COMMONS_HAS_INT128)

@@ -15,8 +15,10 @@
 #include <commons/icon.hpp>
 #include <commons/literals.hpp>
 #include <commons/prioritized.hpp>
+#include <commons/semver.hpp>
 #include <commons/types.hpp>
 #include <commons/version.hpp>
+#include <commons/version_constraint.hpp>
 
 // Optional integrations — each is self-gating, so unconditional inclusion is
 // safe whether or not the backing dependency is available.

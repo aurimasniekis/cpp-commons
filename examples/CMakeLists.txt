@@ -11,6 +11,7 @@ commons_add_example(commons_icon icon.cpp)
 commons_add_example(commons_display_info display_info.cpp)
 commons_add_example(commons_flag flag.cpp)
 commons_add_example(commons_prioritized prioritized.cpp)
+commons_add_example(commons_semver semver.cpp)
 
 if(COMMONS_WITH_NLOHMANN_JSON AND TARGET nlohmann_json::nlohmann_json)
     commons_add_example(commons_json_integration json_integration.cpp)

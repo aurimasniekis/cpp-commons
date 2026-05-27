@@ -5,6 +5,7 @@ commons_examples = {
     'commons_display_info': 'display_info.cpp',
     'commons_flag': 'flag.cpp',
     'commons_prioritized': 'prioritized.cpp',
+    'commons_semver': 'semver.cpp',
 }
 
 if commons_with_json

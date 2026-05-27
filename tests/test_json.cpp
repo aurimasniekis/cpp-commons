@@ -354,4 +354,36 @@ TEST(Json, PrioritizedSetFromNonArrayThrows) {
     EXPECT_THROW((void)j.get<comms::PrioritizedSet<Layer>>(), nlohmann::json::other_error);
 }
 
+// -- SemVer ------------------------------------------------------------------
+// Travels as its canonical version string.
+
+TEST(Json, SemVerRoundTrip) {
+    const auto v = comms::SemVer::parse("1.2.3-rc.1+build.2").value();
+    const json j = v;
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), "1.2.3-rc.1+build.2");
+    EXPECT_EQ(j.get<comms::SemVer>(), v);
+}
+
+TEST(Json, SemVerInvalidThrows) {
+    json j = "1.2.3-01";  // numeric prerelease with a leading zero
+    EXPECT_THROW((void)j.get<comms::SemVer>(), nlohmann::json::other_error);
+}
+
+// -- VersionConstraint -------------------------------------------------------
+// Travels as its raw range string.
+
+TEST(Json, VersionConstraintRoundTrip) {
+    const auto c = comms::VersionConstraint::parse(">=1.2.0 <2.0.0");
+    const json j = c;
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), ">=1.2.0 <2.0.0");
+    EXPECT_EQ(j.get<comms::VersionConstraint>(), c);
+}
+
+TEST(Json, VersionConstraintInvalidThrows) {
+    json j = "^x.y";
+    EXPECT_THROW((void)j.get<comms::VersionConstraint>(), nlohmann::json::other_error);
+}
+
 }  // namespace

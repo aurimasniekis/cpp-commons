@@ -7,10 +7,10 @@ A header-only C++23 library of small, shared building-block types — a
 compile-time fixed-size string, Rust-flavoured fixed-width numeric aliases, an
 RGBA `Color` with full HSL/HSV manipulation and CSS/Material-UI palettes, an
 Iconify `Icon` identifier, presentation metadata (`DisplayInfo`), a compile-time
-named-`Flag` system, and a Spring-style `Prioritized` ordering toolkit. Every
-type carries optional nlohmann/json serialization that turns on by itself when
-the dependency is available. The namespace is `comms`; headers live under
-`<commons/...>`.
+named-`Flag` system, a Spring-style `Prioritized` ordering toolkit, and
+`SemVer` / `VersionConstraint` semantic-version types. Every type carries
+optional nlohmann/json serialization that turns on by itself when the dependency
+is available. The namespace is `comms`; headers live under `<commons/...>`.
 
 ## Why use this library?
 
@@ -245,6 +245,27 @@ Attaches integer priorities to orderable things and sorts them deterministically
 mirroring Spring's `Ordered`: **lower value sorts first** (higher precedence).
 `HIGHEST_PRECEDENCE` is `INT_MIN`, `LOWEST_PRECEDENCE` is `INT_MAX`, and the
 neutral `DEFAULT_PRIORITY` is `0`.
+
+### `comms::SemVer`
+
+A [Semantic Versioning 2.0.0](https://semver.org) value — `major.minor.patch`
+plus optional prerelease and build metadata. `SemVer::parse` is non-throwing
+(returns `std::optional`), accepts an optional `v` prefix, and parses partial
+versions leniently (`"1"`, `"1.2"`). Ordering implements the full §11 prerelease
+precedence — a prerelease ranks below its release and numeric identifiers compare
+numerically, so `1.0.0-alpha.2 < 1.0.0-alpha.10 < 1.0.0-beta < 1.0.0` — while
+build metadata is preserved in the text form but ignored by comparison and
+equality. Because it holds `std::string` members it is a runtime type (not
+`constexpr`).
+
+### `comms::VersionConstraint`
+
+An npm-style semver range that answers `satisfies(SemVer)`: `*`, an exact
+version, the comparisons `>=`/`>`/`<=`/`<`/`!=`, caret (`^1.2.3` → `>=1.2.3
+<2.0.0`) and tilde (`~1.2.3` → `>=1.2.3 <1.3.0`) ranges, and space-separated
+intersections like `>=1.0.0 <2.0.0` (all must match). Unlike `SemVer::parse`,
+`VersionConstraint::parse` **throws** `std::invalid_argument` on a malformed
+sub-version.
 
 ## Common usage patterns
 
@@ -482,6 +503,42 @@ of a `std::set`.
 > `insert`/`find`/`erase(value)` are O(n) — it targets config-sized collections,
 > not large data sets.
 
+### Versions and constraints
+
+```cpp
+#include <commons/semver.hpp>
+#include <commons/version_constraint.hpp>
+
+#include <algorithm>
+#include <iostream>
+#include <vector>
+
+int main() {
+    // Parsing is non-throwing; a `v` prefix and partial versions are accepted.
+    comms::SemVer v = comms::SemVer::parse("v1.4.0-rc.1").value();
+    std::cout << v << "\n";                              // 1.4.0-rc.1
+
+    // Full SemVer ordering: prereleases sort below the release, and numeric
+    // identifiers compare numerically (alpha.2 < alpha.10).
+    std::vector<comms::SemVer> versions;
+    for (const auto* s : {"1.0.0", "1.0.0-alpha.10", "1.0.0-alpha.2", "1.0.0-beta"}) {
+        versions.push_back(comms::SemVer::parse(s).value());
+    }
+    std::ranges::sort(versions);
+    // -> 1.0.0-alpha.2, 1.0.0-alpha.10, 1.0.0-beta, 1.0.0
+
+    // Range constraints answer satisfies(SemVer).
+    auto range = comms::VersionConstraint::parse(">=1.2.0 <2.0.0");
+    std::cout << std::boolalpha
+              << range.satisfies(comms::SemVer::parse("1.5.0").value()) << "\n";  // true
+}
+```
+
+`SemVer` works directly in `std::set`/`std::map`/`std::sort` (via its
+`operator<=>`) and in `std::unordered_*` (via the `std::hash` specialization);
+both `SemVer` and `VersionConstraint` also support `std::format`, `operator<<`,
+and JSON.
+
 ### JSON serialization (optional)
 
 With nlohmann/json available, every public type gains `to_json`/`from_json`.
@@ -516,7 +573,8 @@ int main() {
 The mappings are: `FixedString` and `Icon` ⇄ strings; `Color` ⇄ a hex string
 (`#RRGGBB`, or `#RRGGBBAA` when not opaque); `Hsl`/`Hsv` ⇄ objects; `DisplayInfo`
 ⇄ an object with absent fields omitted; `FlagRef` ⇄ its name and `FlagSet` ⇄ an
-array of names; `i128`/`u128` ⇄ decimal strings; the complex aliases ⇄
+array of names; `SemVer` ⇄ its canonical version string and `VersionConstraint`
+⇄ its raw range string; `i128`/`u128` ⇄ decimal strings; the complex aliases ⇄
 `[real, imaginary]` arrays; `WithPriority<T>` ⇄ `{"priority":N,"value":<T>}` and
 `PrioritizedSet<T>` ⇄ a sorted array — both only when `T` is itself
 JSON-serializable.
@@ -597,21 +655,23 @@ synchronized; treat concurrent mutation as unsafe.
 
 ## API overview
 
-| Header                     | Provides                                                                                                                                                                                  |
-|----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `commons/commons.hpp`      | Umbrella header (all core types + JSON hooks).                                                                                                                                            |
-| `commons/version.hpp`      | Generated from `version.hpp.in` by the build: `COMMONS_VERSION_MAJOR/MINOR/PATCH/STRING` macros and the `comms::version` / `version_major` / `version_minor` / `version_patch` constants. |
-| `commons/types.hpp`        | `i8`…`u64`, `f32`/`f64`, `usize`/`isize`, complex aliases (`cs8`…`cs64`, `cu8`…`cu64`, `cf32`/`cf64`), and `i128`/`u128` (gated by `COMMONS_HAS_INT128`).                                 |
-| `commons/fixed_string.hpp` | `comms::FixedString<N>` — structural, NTTP-friendly fixed string.                                                                                                                         |
-| `commons/color.hpp`        | `comms::Color`, `comms::Hsl`/`comms::Hsv`, and `comms::Colors::css` / `comms::Colors::mui` palettes.                                                                                      |
-| `commons/icon.hpp`         | `comms::Icon` — an Iconify `set:name` identifier; `Icon::from` / `Icon::parse`.                                                                                                           |
-| `commons/icons.hpp`        | Opt-in predefined catalogs: `comms::Icons::mdi::...`. Not pulled by the umbrella.                                                                                                         |
-| `commons/literals.hpp`     | The `comms::literals` user-defined literals: `"#6366f1"_color` and `"mdi:home"_icon` (both `consteval`).                                                                                  |
-| `commons/display_info.hpp` | `comms::DisplayInfo`, the `comms::HasDisplayInfo<T>` trait, free `comms::display_info<T>()`, and the `comms::Displayable<T>` concept.                                                     |
-| `commons/flag.hpp`         | `comms::Flag`/`FlagCategory`, `FlagRef`, `FlagSet`, `GlobalFlagRegistry`, the `IHasFlags`/`HasFlags`/`FlagBuilderMixin`/`FlagBuilderGetters` mixins, and the `COMMONS_*_FLAG*` macros.    |
-| `commons/prioritized.hpp`  | `comms::Prioritized`, `get_priority`, the comparators, `PrioritizedSet<T>`, `PrioritizedBuilder<Derived>`, and `WithPriority<T>` / `with_priority` / `make_prioritized`.                  |
-| `commons/config.hpp`       | The `COMMONS_WITH_*` feature-gate macros.                                                                                                                                                 |
-| `commons/json.hpp`         | Optional nlohmann/json hooks (inert unless the dependency is present).                                                                                                                    |
+| Header                           | Provides                                                                                                                                                                                  |
+|----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `commons/commons.hpp`            | Umbrella header (all core types + JSON hooks).                                                                                                                                            |
+| `commons/version.hpp`            | Generated from `version.hpp.in` by the build: `COMMONS_VERSION_MAJOR/MINOR/PATCH/STRING` macros and the `comms::version` / `version_major` / `version_minor` / `version_patch` constants. |
+| `commons/types.hpp`              | `i8`…`u64`, `f32`/`f64`, `usize`/`isize`, complex aliases (`cs8`…`cs64`, `cu8`…`cu64`, `cf32`/`cf64`), and `i128`/`u128` (gated by `COMMONS_HAS_INT128`).                                 |
+| `commons/fixed_string.hpp`       | `comms::FixedString<N>` — structural, NTTP-friendly fixed string.                                                                                                                         |
+| `commons/color.hpp`              | `comms::Color`, `comms::Hsl`/`comms::Hsv`, and `comms::Colors::css` / `comms::Colors::mui` palettes.                                                                                      |
+| `commons/icon.hpp`               | `comms::Icon` — an Iconify `set:name` identifier; `Icon::from` / `Icon::parse`.                                                                                                           |
+| `commons/icons.hpp`              | Opt-in predefined catalogs: `comms::Icons::mdi::...`. Not pulled by the umbrella.                                                                                                         |
+| `commons/literals.hpp`           | The `comms::literals` user-defined literals: `"#6366f1"_color` and `"mdi:home"_icon` (both `consteval`).                                                                                  |
+| `commons/display_info.hpp`       | `comms::DisplayInfo`, the `comms::HasDisplayInfo<T>` trait, free `comms::display_info<T>()`, and the `comms::Displayable<T>` concept.                                                     |
+| `commons/flag.hpp`               | `comms::Flag`/`FlagCategory`, `FlagRef`, `FlagSet`, `GlobalFlagRegistry`, the `IHasFlags`/`HasFlags`/`FlagBuilderMixin`/`FlagBuilderGetters` mixins, and the `COMMONS_*_FLAG*` macros.    |
+| `commons/prioritized.hpp`        | `comms::Prioritized`, `get_priority`, the comparators, `PrioritizedSet<T>`, `PrioritizedBuilder<Derived>`, and `WithPriority<T>` / `with_priority` / `make_prioritized`.                  |
+| `commons/semver.hpp`             | `comms::SemVer` — a Semantic Versioning 2.0.0 value; non-throwing `SemVer::parse`, full §11 ordering, `std::hash`.                                                                        |
+| `commons/version_constraint.hpp` | `comms::VersionConstraint` — an npm-style semver range answering `satisfies(SemVer)`; `VersionConstraint::parse` throws on a malformed sub-version.                                       |
+| `commons/config.hpp`             | The `COMMONS_WITH_*` feature-gate macros.                                                                                                                                                 |
+| `commons/json.hpp`               | Optional nlohmann/json hooks (inert unless the dependency is present).                                                                                                                    |
 
 ## Examples
 
@@ -625,6 +685,7 @@ Each example is a self-contained program under `examples/`.
 | `examples/display_info.cpp`         | Intrusive and non-intrusive `DisplayInfo` attachment and the `Displayable` concept.          |
 | `examples/flag.cpp`                 | `FlagSet`, the global registry, and a category-constrained builder read through `IHasFlags`. |
 | `examples/prioritized.cpp`          | The builder mixin, both `WithPriority` flavors, `PrioritizedSet`, and the comparators.       |
+| `examples/semver.cpp`               | Parsing, full-precedence sorting, `std::format`, and `VersionConstraint` range checks.       |
 | `examples/json_integration.cpp`     | The optional nlohmann/json round-trips (requires the integration).                           |
 | `examples/consumers/fetch_content/` | A standalone downstream project that pulls `commons` via FetchContent.                       |
 

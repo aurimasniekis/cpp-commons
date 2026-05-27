@@ -10,6 +10,8 @@ set(_commons_test_sources
     test_display_info.cpp
     test_flag.cpp
     test_prioritized.cpp
+    test_semver.cpp
+    test_version_constraint.cpp
 )
 
 if(COMMONS_WITH_NLOHMANN_JSON AND TARGET nlohmann_json::nlohmann_json)

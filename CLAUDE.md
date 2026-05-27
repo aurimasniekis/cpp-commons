@@ -38,6 +38,16 @@ The 7,447-entry MDI table in `commons/icons/mdi.hpp` is **generated** by
 `python3 scripts/generate_mdi_icons.py data/iconify-mdi.json > include/commons/icons/mdi.hpp`
 (it runs `clang-format`, so output is idempotent).
 
+`comms::SemVer` (`semver.hpp`) is a Semantic Versioning 2.0.0 value
+(`major.minor.patch` + optional prerelease/build, full §11 prerelease ordering,
+build metadata parsed but ignored in comparison, lenient partial parsing) and
+`comms::VersionConstraint` (`version_constraint.hpp`) is an npm-style semver range
+(`^`/`~`, comparisons, space-separated intersection) answering
+`satisfies(SemVer)`. Both hold `std::string` members, so — unlike `Color`/`Icon` —
+they are runtime (non-`constexpr`) types with no UDL literal; `SemVer::parse` is
+non-throwing while `VersionConstraint::parse` throws `std::invalid_argument` on a
+malformed sub-version.
+
 The `comms::literals` user-defined literals `"#6366f1"_color` and
 `"mdi:home"_icon` live in `literals.hpp`; both are `consteval`, so a
 malformed literal is a compile error. The umbrella includes `literals.hpp`.
