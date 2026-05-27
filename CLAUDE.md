@@ -60,6 +60,19 @@ metadata — name/description/icon/color — that any type opts into via a
 `IHasFlags`/`HasFlags`/`FlagBuilderMixin`/`FlagBuilderGetters` — for types that
 own a flag set).
 
+`comms::IOrigin` (`origin.hpp`) is a polymorphic provenance envelope: an abstract
+base whose `kind()` discriminator is supplied as a compile-time `FixedString`
+template parameter via the `OriginKind<"kind", Derived>` CRTP base (the
+`IconifySet<FixedString Set>` pattern), which also wires `clone()` and a
+`DisplayInfo`-backed `info()`. Built-in kinds are `CoreOrigin`/`InternalOrigin`/
+`ExternalOrigin`/`UnknownOrigin`; new kinds self-register into the program-wide
+`GlobalOriginRegistry` via `COMMONS_REGISTER_ORIGIN(Type)` (mirroring
+`GlobalFlagRegistry`/`COMMONS_REGISTER_FLAG`). `OriginPtr` is
+`std::unique_ptr<IOrigin>`. Per the no-forced-dependency rule, `origin.hpp` holds
+no JSON: `json.hpp` round-trips the built-in kinds (and resolves the `kind`
+discriminator through the registry, via an `adl_serializer<OriginPtr>`); a custom
+kind ships its own `to_json`/`from_json`.
+
 `comms::Prioritized` (`prioritized.hpp`) attaches **priorities** to orderable
 things (adapters, transports, …) and sorts them deterministically — the C++ analog
 of Spring's `Ordered` (lower value = higher precedence,

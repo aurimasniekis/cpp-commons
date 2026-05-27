@@ -14,6 +14,7 @@
 #include <commons/flag.hpp>
 #include <commons/icon.hpp>
 #include <commons/literals.hpp>
+#include <commons/origin.hpp>
 #include <commons/prioritized.hpp>
 #include <commons/semver.hpp>
 #include <commons/types.hpp>

@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -384,6 +385,50 @@ TEST(Json, VersionConstraintRoundTrip) {
 TEST(Json, VersionConstraintInvalidThrows) {
     json j = "^x.y";
     EXPECT_THROW((void)j.get<comms::VersionConstraint>(), nlohmann::json::other_error);
+}
+
+// -- IOrigin / OriginPtr -----------------------------------------------------
+// An origin travels as {"kind", ...fields}; OriginPtr null ⇄ JSON null; an
+// unrecognized kind throws.
+
+TEST(Json, OriginCoreRoundTrip) {
+    const comms::OriginPtr o = std::make_unique<comms::CoreOrigin>();
+    const json j = o;
+    EXPECT_TRUE(j.is_object());
+    EXPECT_EQ(j.at("kind").get<std::string>(), "core");
+
+    const auto back = j.get<comms::OriginPtr>();
+    ASSERT_NE(back, nullptr);
+    EXPECT_EQ(back->kind(), "core");
+}
+
+TEST(Json, OriginExternalRoundTripsSource) {
+    const comms::OriginPtr o = std::make_unique<comms::ExternalOrigin>("npm");
+    const json j = o;
+    EXPECT_EQ(j.at("kind").get<std::string>(), "external");
+    EXPECT_EQ(j.at("source").get<std::string>(), "npm");
+
+    const auto back = j.get<comms::OriginPtr>();
+    auto* ext = dynamic_cast<comms::ExternalOrigin*>(back.get());
+    ASSERT_NE(ext, nullptr);
+    EXPECT_EQ(ext->source, "npm");
+}
+
+TEST(Json, OriginPtrNullIsJsonNull) {
+    constexpr comms::OriginPtr o;  // null
+    const json j = o;
+    EXPECT_TRUE(j.is_null());
+    EXPECT_EQ(j.get<comms::OriginPtr>(), nullptr);
+}
+
+TEST(Json, OriginPtrUnknownKindThrows) {
+    const auto j = json{{"kind", "mystery"}};
+    EXPECT_THROW((void)j.get<comms::OriginPtr>(), nlohmann::json::other_error);
+}
+
+TEST(Json, OriginPtrMissingKindThrows) {
+    const json j = json::object();
+    EXPECT_THROW((void)j.get<comms::OriginPtr>(), nlohmann::json::other_error);
 }
 
 }  // namespace

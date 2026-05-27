@@ -4,6 +4,7 @@ commons_examples = {
     'commons_icon': 'icon.cpp',
     'commons_display_info': 'display_info.cpp',
     'commons_flag': 'flag.cpp',
+    'commons_origin': 'origin.cpp',
     'commons_prioritized': 'prioritized.cpp',
     'commons_semver': 'semver.cpp',
 }
