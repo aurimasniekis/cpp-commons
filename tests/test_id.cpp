@@ -148,7 +148,7 @@ TEST(Id, HashAgreesWithReprHash) {
     constexpr std::uint64_t k = 12345;
     EXPECT_EQ(std::hash<BareId64>{}(BareId64{k}), std::hash<std::uint64_t>{}(k));
 
-    constexpr std::string s = "abc";
+    const std::string s = "abc";
     EXPECT_EQ(std::hash<EventsIdString>{}(EventsIdString{s}), std::hash<std::string>{}(s));
 }
 

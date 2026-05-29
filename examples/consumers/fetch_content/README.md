@@ -11,8 +11,8 @@ time, and the bytes are verified):
 ```cmake
 FetchContent_Declare(
     cpp-commons
-    URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.4.tar.gz
-    URL_HASH SHA256=511268a30e692e82365669738c734d093edc7ca76c898337125f032569c8f907
+    URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.5.tar.gz
+    URL_HASH SHA256=<filled-in-after-tagging-v0.1.5>
 )
 ```
 
@@ -30,7 +30,7 @@ cmake --build /tmp/commons-consumer-build
 Expected output (something close to):
 
 ```
-commons version: 0.1.4
+commons version: 0.1.5
 tag            : downstream
 count          : 3
 ```
