@@ -29,6 +29,9 @@
 ///     `PrioritizedSet<T>` ⇄ JSON **array** in sorted order — both only when
 ///     `T` is itself json-serializable; the set's `from_json` additionally
 ///     requires `T`'s priority to be recoverable from the element.
+///   - `Id<Tag, Repr>` ⇄ the inner `Repr`'s natural JSON (a number for the
+///     uint reprs, a string for `std::string`, the ULID string when ULID is
+///     also enabled).
 ///
 /// The fixed-width builtin aliases (`i8`…`u64`, `f32`, `f64`, `usize`,
 /// `isize`) need nothing here: nlohmann already serializes the underlying
@@ -43,6 +46,7 @@
 #include <commons/fixed_string.hpp>
 #include <commons/flag.hpp>
 #include <commons/icon.hpp>
+#include <commons/id.hpp>
 #include <commons/origin.hpp>
 #include <commons/prioritized.hpp>
 #include <commons/semver.hpp>
@@ -142,16 +146,16 @@ inline void to_json(::nlohmann::json& j, const DisplayInfo& d) {
 
 inline void from_json(const ::nlohmann::json& j, DisplayInfo& d) {
     d = DisplayInfo{};
-    if (auto it = j.find("name"); it != j.end() && !it->is_null()) {
+    if (const auto it = j.find("name"); it != j.end() && !it->is_null()) {
         d.name = it->template get<std::string>();
     }
-    if (auto it = j.find("description"); it != j.end() && !it->is_null()) {
+    if (const auto it = j.find("description"); it != j.end() && !it->is_null()) {
         d.description = it->template get<std::string>();
     }
-    if (auto it = j.find("icon"); it != j.end() && !it->is_null()) {
+    if (const auto it = j.find("icon"); it != j.end() && !it->is_null()) {
         d.icon = it->template get<Icon>();  // reuses Icon from_json (validates)
     }
-    if (auto it = j.find("color"); it != j.end() && !it->is_null()) {
+    if (const auto it = j.find("color"); it != j.end() && !it->is_null()) {
         d.color = it->template get<Color>();  // reuses Color from_json (validates)
     }
 }
@@ -305,6 +309,21 @@ inline void from_json(const ::nlohmann::json& j, VersionConstraint& v) {
     }
 }
 
+// Id<Tag, Repr> ⇄ inner Repr's natural JSON ----------------------------------
+// Delegates straight to the wrapped representation's nlohmann handler — uint
+// reprs travel as JSON numbers, `std::string` as a JSON string, and `ulid::Ulid`
+// (when ULID is on) as the ULID-canonical string via its own to_json/from_json.
+
+template <class Tag, class Repr>
+inline void to_json(::nlohmann::json& j, const Id<Tag, Repr>& id) {
+    j = id.value();
+}
+
+template <class Tag, class Repr>
+inline void from_json(const ::nlohmann::json& j, Id<Tag, Repr>& id) {
+    id = Id<Tag, Repr>{j.template get<Repr>()};
+}
+
 // IOrigin ⇄ JSON object {"kind", ...fields} ----------------------------------
 // The base library carries no JSON, so the origin hooks live here. The four
 // built-in kinds round-trip their fields below; a custom origin kind supplies
@@ -328,7 +347,7 @@ inline void to_json(::nlohmann::json& j, const ExternalOrigin& o) {
     }
 }
 inline void from_json(const ::nlohmann::json& j, ExternalOrigin& o) {
-    if (auto it = j.find("source"); it != j.end() && !it->is_null()) {
+    if (const auto it = j.find("source"); it != j.end() && !it->is_null()) {
         it->get_to(o.source);
     }
 }
@@ -341,8 +360,7 @@ inline void from_json(const ::nlohmann::json& /*j*/, UnknownOrigin& /*o*/) {}
 // Polymorphic write: dispatch on kind() to the matching built-in serializer; an
 // unrecognized (custom) kind falls back to writing just its discriminator.
 inline void to_json(::nlohmann::json& j, const IOrigin& o) {
-    const auto k = o.kind();
-    if (k == CoreOrigin::KIND) {
+    if (const auto k = o.kind(); k == CoreOrigin::KIND) {
         j = static_cast<const CoreOrigin&>(o);
     } else if (k == InternalOrigin::KIND) {
         j = static_cast<const InternalOrigin&>(o);
@@ -373,10 +391,10 @@ namespace detail {
     return std::string{buf.data() + pos, buf.size() - pos};
 }
 
-[[nodiscard]] inline std::string i128_to_string(i128 v) {
+[[nodiscard]] inline std::string i128_to_string(const i128 v) {
     const bool negative = v < 0;
     // Form the magnitude in unsigned space so INT128_MIN is handled correctly.
-    u128 mag = negative ? (~static_cast<u128>(v) + 1) : static_cast<u128>(v);
+    const u128 mag = negative ? (~static_cast<u128>(v) + 1) : static_cast<u128>(v);
     std::string digits = u128_to_string(mag);
     return negative ? "-" + digits : digits;
 }
@@ -484,7 +502,7 @@ namespace nlohmann {
 template <>
 struct adl_serializer<::comms::i128> {
     template <typename BasicJsonType>
-    static void to_json(BasicJsonType& j, ::comms::i128 v) {
+    static void to_json(BasicJsonType& j, const ::comms::i128 v) {
         j = ::comms::detail::i128_to_string(v);
     }
 
@@ -497,7 +515,7 @@ struct adl_serializer<::comms::i128> {
 template <>
 struct adl_serializer<::comms::u128> {
     template <typename BasicJsonType>
-    static void to_json(BasicJsonType& j, ::comms::u128 v) {
+    static void to_json(BasicJsonType& j, const ::comms::u128 v) {
         j = ::comms::detail::u128_to_string(v);
     }
 
@@ -516,10 +534,8 @@ struct adl_serializer<::comms::u128> {
 // namespace `comms`. Specialize nlohmann's serializer instead. They travel as a
 // two-element JSON array [real, imaginary]; the component type T serializes
 // natively.
-namespace nlohmann {
-
 template <typename T>
-struct adl_serializer<std::complex<T>> {
+struct nlohmann::adl_serializer<std::complex<T>> {
     template <typename BasicJsonType>
     static void to_json(BasicJsonType& j, const std::complex<T>& c) {
         j = BasicJsonType::array();
@@ -532,18 +548,14 @@ struct adl_serializer<std::complex<T>> {
         c.real(j.at(0).template get<T>());
         c.imag(j.at(1).template get<T>());
     }
-};
-
-}  // namespace nlohmann
+};  // namespace nlohmann
 
 // std::optional<T> lives in namespace `std`, so (like std::complex) ADL cannot
 // find a `to_json` / `from_json` for it in namespace `comms`. Specialize
 // nlohmann's serializer instead: `nullopt` round-trips as JSON `null`, and a
 // held value travels via the wrapped T's own serializer.
-namespace nlohmann {
-
 template <typename T>
-struct adl_serializer<std::optional<T>> {
+struct nlohmann::adl_serializer<std::optional<T>> {
     template <typename BasicJsonType>
     static void to_json(BasicJsonType& j, const std::optional<T>& opt) {
         if (opt.has_value()) {
@@ -561,19 +573,15 @@ struct adl_serializer<std::optional<T>> {
             opt = j.template get<T>();
         }
     }
-};
-
-}  // namespace nlohmann
+};  // namespace nlohmann
 
 // comms::OriginPtr is a std::unique_ptr<IOrigin>, which lives in namespace `std`,
 // so (like std::optional) ADL cannot find a to_json/from_json for it in namespace
 // comms. Specialize nlohmann's serializer: a null pointer round-trips as JSON
 // null; a held origin writes via its polymorphic to_json and reads back by
 // resolving "kind" against the GlobalOriginRegistry (unknown kind throws).
-namespace nlohmann {
-
 template <>
-struct adl_serializer<::comms::OriginPtr> {
+struct nlohmann::adl_serializer<::comms::OriginPtr> {
     template <typename BasicJsonType>
     static void to_json(BasicJsonType& j, const ::comms::OriginPtr& o) {
         if (o) {
@@ -611,8 +619,6 @@ struct adl_serializer<::comms::OriginPtr> {
         }
         o = std::move(created);
     }
-};
-
-}  // namespace nlohmann
+};  // namespace nlohmann
 
 #endif  // COMMONS_WITH_NLOHMANN_JSON

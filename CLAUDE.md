@@ -60,6 +60,19 @@ metadata — name/description/icon/color — that any type opts into via a
 `IHasFlags`/`HasFlags`/`FlagBuilderMixin`/`FlagBuilderGetters` — for types that
 own a flag set).
 
+`comms::Id<Tag, Repr>` (`id.hpp`) is a strong-typed identifier wrapping an
+allowed `Repr` (the unsigned fixed-width ints `u8`/`u16`/`u32`/`u64`,
+`std::string`, and — gated by `COMMONS_WITH_ULID` — `ulid::Ulid`) under a
+phantom `Tag` so ids of different kinds cannot be mixed. Aliases `Uint8Id<Tag>`
+… `Uint64Id<Tag>`, `StringId<Tag>`, and `UlidId<Tag>` save typing; the
+`COMMONS_DEFINE_UINT{8,16,32,64}_ID`, `COMMONS_DEFINE_STRING_ID`, and
+`COMMONS_DEFINE_ULID_ID` macros emit both a `Name##Tag` (with a
+`static constexpr std::string_view name`) and a `using Name = …Id<Name##Tag>`
+alias in one shot. `to_string` delegates to the underlying repr;
+`display_string` prefixes it with `Tag::name` for named tags; the
+`std::formatter<Id>` specialization inherits from `std::formatter<Repr>` so any
+spec the underlying type accepts (e.g. `"{:#x}"`) works transparently.
+
 `comms::IOrigin` (`origin.hpp`) is a polymorphic provenance envelope: an abstract
 base whose `kind()` discriminator is supplied as a compile-time `FixedString`
 template parameter via the `OriginKind<"kind", Derived>` CRTP base (the
@@ -92,9 +105,15 @@ members overridable at build time — see the override-seam note below.
 
 Each optional integration is a `COMMONS_WITH_*` macro resolving to `1`/`0`:
 
-- A **predefined** macro (from CMake `-DCOMMONS_WITH_NLOHMANN_JSON=ON`, Meson
-  `-Djson=true`, or the consumer) always wins — forces the integration on or off.
-- Otherwise **autodetect** via `__has_include(<nlohmann/json.hpp>)`.
+- A **predefined** macro (from CMake `-DCOMMONS_WITH_NLOHMANN_JSON=ON` /
+  `-DCOMMONS_WITH_ULID=ON`, Meson `-Djson=true` / `-Dulid=true`, or the
+  consumer) always wins — forces the integration on or off.
+- Otherwise **autodetect** via `__has_include(<nlohmann/json.hpp>)` /
+  `__has_include(<ulid/ulid.h>)`.
+
+The currently supported gates are `COMMONS_WITH_NLOHMANN_JSON` (turns on the
+JSON `to_json`/`from_json` hooks) and `COMMONS_WITH_ULID` (turns on
+`comms::Id<Tag, ulid::Ulid>` plus the `COMMONS_DEFINE_ULID_ID` macro).
 
 `COMMONS_HAS_INT128` (in `types.hpp`) signals 128-bit integer availability
 (`__SIZEOF_INT128__`).
@@ -133,7 +152,7 @@ guard), and include it from the umbrella `commons/commons.hpp`.
 
 ```sh
 make test           # base library: configure + build + ctest (no forced integrations)
-make integrations   # COMMONS_WITH_NLOHMANN_JSON=ON, fetches nlohmann/json, runs test_json
+make integrations   # COMMONS_WITH_NLOHMANN_JSON=ON + COMMONS_WITH_ULID=ON, fetches both
 make examples       # build + run every commons_* example
 make format-check   # clang-format --dry-run --Werror
 make tidy           # clang-tidy (build-tidy/)
@@ -142,7 +161,7 @@ make ci             # format-check + tidy + test + sanitize + release + integrat
 ```
 
 Meson: `meson setup build-meson -Dtests=true -Dexamples=true && meson test -C build-meson`
-(add `-Djson=true` to force the integration).
+(add `-Djson=true` / `-Dulid=true` to force an integration).
 
 ## Naming / style notes
 

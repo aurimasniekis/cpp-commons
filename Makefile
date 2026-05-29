@@ -23,7 +23,7 @@ help:
 	@echo "  make test              Run ctest in $(BUILD_DIR)/ (base library, no forced integrations)"
 	@echo "  make example           Run the commons_hello example"
 	@echo "  make examples          Build and run every commons_* example (fails on any non-zero exit)"
-	@echo "  make integrations      Configure+build+test in build-integrations/ with COMMONS_WITH_NLOHMANN_JSON=ON"
+	@echo "  make integrations      Configure+build+test in build-integrations/ with COMMONS_WITH_NLOHMANN_JSON=ON and COMMONS_WITH_ULID=ON"
 	@echo "  make all               configure + build + test"
 	@echo ""
 	@echo "  make sanitize          Configure+build+test in build-san/ with ASan+UBSan"
@@ -78,11 +78,12 @@ examples: build
 		exit 1; \
 	fi
 
-# Force the optional nlohmann/json integration ON (fetches the dependency) and
-# run the full suite, including the conditional integration tests/examples.
+# Force every optional integration ON (fetches each dependency) and run the
+# full suite, including the conditional integration tests/examples.
 .PHONY: integrations
 integrations:
-	$(CMAKE) -S . -B build-integrations $(CMAKE_GEN_FLAG) -DCMAKE_BUILD_TYPE=Debug -DCOMMONS_WITH_NLOHMANN_JSON=ON
+	$(CMAKE) -S . -B build-integrations $(CMAKE_GEN_FLAG) -DCMAKE_BUILD_TYPE=Debug \
+		-DCOMMONS_WITH_NLOHMANN_JSON=ON -DCOMMONS_WITH_ULID=ON
 	$(CMAKE) --build build-integrations -j $(JOBS)
 	$(CTEST) --test-dir build-integrations --output-on-failure
 

@@ -7,6 +7,7 @@ commons_test_sources = [
     'test_commons.cpp',
     'test_color.cpp',
     'test_icon.cpp',
+    'test_id.cpp',
     'test_literals.cpp',
     'test_display_info.cpp',
     'test_flag.cpp',

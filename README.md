@@ -8,10 +8,12 @@ compile-time fixed-size string, Rust-flavoured fixed-width numeric aliases, an
 RGBA `Color` with full HSL/HSV manipulation and CSS/Material-UI palettes, an
 Iconify `Icon` identifier, presentation metadata (`DisplayInfo`), a compile-time
 named-`Flag` system, a Spring-style `Prioritized` ordering toolkit,
-`SemVer` / `VersionConstraint` semantic-version types, and an `IOrigin`
-provenance envelope. Every type carries optional nlohmann/json serialization that
-turns on by itself when the dependency is available. The namespace is `comms`;
-headers live under `<commons/...>`.
+`SemVer` / `VersionConstraint` semantic-version types, an `IOrigin`
+provenance envelope, and a strong-typed `Id<Tag, Repr>` identifier. Every type
+carries optional nlohmann/json serialization that turns on by itself when the
+dependency is available; `Id<Tag, ulid::Ulid>` lights up the same way when
+cpp-ulid is on the include path. The namespace is `comms`; headers live under
+`<commons/...>`.
 
 ## Why use this library?
 
@@ -103,10 +105,11 @@ FetchContent_MakeAvailable(commons)
 target_link_libraries(example PRIVATE commons::commons)
 ```
 
-By default no optional dependency is fetched: the JSON hooks auto-detect
-nlohmann/json. To *force* the integration on — which additionally fetches
-nlohmann/json (version 3.12.0 or newer) and hard-defines the gate macro —
-configure with `-DCOMMONS_WITH_NLOHMANN_JSON=ON`.
+By default no optional dependency is fetched: the JSON hooks and the ULID
+`Id` repr both auto-detect their backing headers. To *force* an integration on
+— which additionally fetches the dependency and hard-defines the gate macro —
+configure with `-DCOMMONS_WITH_NLOHMANN_JSON=ON` (fetches nlohmann/json 3.12.0
+or newer) and/or `-DCOMMONS_WITH_ULID=ON` (fetches cpp-ulid 1.0.0).
 
 ### CMake — installed package
 
@@ -117,10 +120,10 @@ find_package(commons 0.1 REQUIRED)
 target_link_libraries(my_app PRIVATE commons::commons)
 ```
 
-Install rules are automatically disabled when nlohmann/json was fetched (a
-fetched dependency cannot be re-exported). For a clean install, leave
-`COMMONS_WITH_NLOHMANN_JSON=OFF` (the default) or provide nlohmann/json through a
-system package.
+Install rules are automatically disabled when nlohmann/json or cpp-ulid was
+fetched (a fetched dependency cannot be re-exported). For a clean install,
+leave the gate options `OFF` (the default) or provide the dependencies through
+system packages.
 
 ### Meson
 
@@ -129,8 +132,9 @@ commons_dep = dependency('commons', version: '>=0.1.0',
     fallback: ['commons', 'commons_dep'])
 ```
 
-Meson options mirror the CMake ones: `-Djson=true|false`, `-Dtests=true|false`,
-`-Dexamples=true|false`. A `pkg-config` file is generated on install.
+Meson options mirror the CMake ones: `-Djson=true|false`,
+`-Dulid=true|false`, `-Dtests=true|false`, `-Dexamples=true|false`. A
+`pkg-config` file is generated on install.
 
 ### Manual / header-only
 
@@ -149,8 +153,10 @@ include the umbrella `commons/commons.hpp` or `commons/version.hpp` directly.
   this with `target_compile_features(commons INTERFACE cxx_std_23)`.
 - **Build tooling:** CMake 3.25 or newer, or Meson 1.3.0 or newer. Neither is
   required if you only copy the headers.
-- **Optional dependency:** [nlohmann/json](https://github.com/nlohmann/json)
-  3.12.0 or newer, which enables `<commons/json.hpp>`.
+- **Optional dependencies:** [nlohmann/json](https://github.com/nlohmann/json)
+  3.12.0 or newer enables `<commons/json.hpp>`;
+  [cpp-ulid](https://github.com/aurimasniekis/cpp-ulid) 1.0.0 enables
+  `comms::Id<Tag, ulid::Ulid>`.
 
 ## Core concepts
 
@@ -279,6 +285,22 @@ version, the comparisons `>=`/`>`/`<=`/`<`/`!=`, caret (`^1.2.3` → `>=1.2.3
 intersections like `>=1.0.0 <2.0.0` (all must match). Unlike `SemVer::parse`,
 `VersionConstraint::parse` **throws** `std::invalid_argument` on a malformed
 sub-version.
+
+### `comms::Id<Tag, Repr>`
+
+A strong-typed identifier: a `Repr` value tagged with a phantom `Tag` so ids
+of different kinds cannot be mixed even when the underlying representation is
+identical. The allowed reprs are deliberately narrow — the unsigned
+fixed-width ints (`std::uint8_t` / `16` / `32` / `64`), `std::string`, and —
+gated by `COMMONS_WITH_ULID` — `ulid::Ulid`. Aliases `Uint8Id<Tag>` …
+`Uint64Id<Tag>`, `StringId<Tag>`, and `UlidId<Tag>` save typing; the
+`COMMONS_DEFINE_UINT{8,16,32,64}_ID`, `COMMONS_DEFINE_STRING_ID`, and
+`COMMONS_DEFINE_ULID_ID` macros emit both a `Name##Tag` (with a
+`static constexpr std::string_view name`) and the matching `using` alias in
+one shot. `to_string` delegates to the underlying repr; `display_string`
+prefixes it with `Tag::name` for named tags; and the `std::formatter<Id>`
+specialization inherits from `std::formatter<Repr>` so any spec the wrapped
+type accepts (e.g. `"{:#x}"` for the uint reprs) works transparently.
 
 ## Common usage patterns
 
@@ -552,6 +574,39 @@ int main() {
 both `SemVer` and `VersionConstraint` also support `std::format`, `operator<<`,
 and JSON.
 
+### Strong-typed ids
+
+```cpp
+#include <commons/id.hpp>
+
+#include <format>
+#include <iostream>
+#include <string>
+
+// Both macros emit a UserIdTag/OrderIdTag with a `name` member and a `using`
+// alias. They have to be invoked at namespace (or class) scope, since they
+// declare a struct with a static member.
+COMMONS_DEFINE_UINT64_ID(UserId, "user");
+COMMONS_DEFINE_STRING_ID(OrderId, "order");
+
+int main() {
+    UserId u{1234567u};
+    OrderId o{std::string{"o-abc-1"}};
+
+    // display_string prefixes with the tag name; to_string is the bare repr.
+    std::cout << comms::display_string(u) << "\n";   // user/1234567
+    std::cout << comms::display_string(o) << "\n";   // order/o-abc-1
+
+    // The std::formatter inherits from std::formatter<Repr>, so any spec the
+    // underlying type accepts works on the Id directly.
+    std::cout << std::format("{:#x}", u) << "\n";    // 0x12d687
+
+    // Different tags are unrelated types — won't compile:
+    // bool same = (u == UserId{0u});                // OK
+    // bool same = (u == OrderId{"o-abc-1"});        // type mismatch
+}
+```
+
 ### JSON serialization (optional)
 
 With nlohmann/json available, every public type gains `to_json`/`from_json`.
@@ -594,7 +649,9 @@ unknown kind throws; a custom kind brings its own `to_json`/`from_json`);
 `i128`/`u128` ⇄ decimal strings; the complex aliases ⇄
 `[real, imaginary]` arrays; `WithPriority<T>` ⇄ `{"priority":N,"value":<T>}` and
 `PrioritizedSet<T>` ⇄ a sorted array — both only when `T` is itself
-JSON-serializable.
+JSON-serializable; `Id<Tag, Repr>` ⇄ the inner `Repr`'s natural JSON (a number
+for the uint reprs, a string for `std::string`, the ULID string when ULID is
+also enabled).
 
 ## Error handling
 
@@ -688,6 +745,7 @@ synchronized; treat concurrent mutation as unsafe.
 | `commons/prioritized.hpp`        | `comms::Prioritized`, `get_priority`, the comparators, `PrioritizedSet<T>`, `PrioritizedBuilder<Derived>`, and `WithPriority<T>` / `with_priority` / `make_prioritized`.                    |
 | `commons/semver.hpp`             | `comms::SemVer` — a Semantic Versioning 2.0.0 value; non-throwing `SemVer::parse`, full §11 ordering, `std::hash`.                                                                          |
 | `commons/version_constraint.hpp` | `comms::VersionConstraint` — an npm-style semver range answering `satisfies(SemVer)`; `VersionConstraint::parse` throws on a malformed sub-version.                                         |
+| `commons/id.hpp`                 | `comms::Id<Tag, Repr>` — strong-typed identifier; `Uint{8,16,32,64}Id`/`StringId`/`UlidId` aliases, `to_string`/`display_string`, and the `COMMONS_DEFINE_*_ID` macros.                     |
 | `commons/config.hpp`             | The `COMMONS_WITH_*` feature-gate macros.                                                                                                                                                   |
 | `commons/json.hpp`               | Optional nlohmann/json hooks (inert unless the dependency is present).                                                                                                                      |
 
@@ -705,6 +763,7 @@ Each example is a self-contained program under `examples/`.
 | `examples/origin.cpp`               | `IOrigin` kinds, `clone()`, the `DisplayInfo` description, and registry resolution by kind.  |
 | `examples/prioritized.cpp`          | The builder mixin, both `WithPriority` flavors, `PrioritizedSet`, and the comparators.       |
 | `examples/semver.cpp`               | Parsing, full-precedence sorting, `std::format`, and `VersionConstraint` range checks.       |
+| `examples/id.cpp`                   | The `Id<Tag, Repr>` macros, `display_string`, inherited formatter specs, and the ULID repr.  |
 | `examples/json_integration.cpp`     | The optional nlohmann/json round-trips (requires the integration).                           |
 | `examples/consumers/fetch_content/` | A standalone downstream project that pulls `commons` via FetchContent.                       |
 
@@ -714,7 +773,7 @@ The test suite uses GoogleTest. With the bundled `Makefile`:
 
 ```bash
 make test           # base library: configure + build + run ctest
-make integrations   # same, with nlohmann/json forced on (runs the JSON tests)
+make integrations   # same, with nlohmann/json and cpp-ulid forced on
 make examples       # build and run every example
 ```
 
@@ -734,7 +793,8 @@ meson setup build-meson -Dtests=true -Dexamples=true
 meson test -C build-meson
 ```
 
-Add `-Djson=true` to force the JSON integration under Meson.
+Add `-Djson=true` and/or `-Dulid=true` to force the respective integration
+under Meson.
 
 ## FAQ
 
@@ -761,6 +821,11 @@ out of the umbrella header.
 which includes it) and make sure `<nlohmann/json.hpp>` is reachable. To force the
 dependency to be fetched and linked, configure with
 `-DCOMMONS_WITH_NLOHMANN_JSON=ON` (CMake) or `-Djson=true` (Meson).
+
+**How do I get the ULID `Id` repr?** `comms::Id<Tag, ulid::Ulid>` (and its
+`UlidId<Tag>` / `COMMONS_DEFINE_ULID_ID` shortcuts) light up when `<ulid/ulid.h>`
+is on the include path. To force the dependency to be fetched and linked,
+configure with `-DCOMMONS_WITH_ULID=ON` (CMake) or `-Dulid=true` (Meson).
 
 ## Contributing
 

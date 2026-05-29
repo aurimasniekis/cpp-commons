@@ -16,15 +16,22 @@ subdir('include/commons')
 
 commons_deps = []
 commons_with_json = get_option('json')
+commons_with_ulid = get_option('ulid')
 
-# Optional integration defaults OFF: the headers auto-detect nlohmann/json via
-# __has_include, so the base library forces no dependency. json=true fetches
-# the dependency and hard-defines the gate macro.
+# Optional integrations default OFF: the headers auto-detect nlohmann/json /
+# ulid via __has_include, so the base library forces no dependency. Setting
+# `json=true` / `ulid=true` fetches the dependency and hard-defines its gate.
 if commons_with_json
     json_dep = dependency('nlohmann_json', version: '>=3.12.0',
         fallback: ['nlohmann_json', 'nlohmann_json_dep'])
     commons_deps += json_dep
     add_project_arguments('-DCOMMONS_WITH_NLOHMANN_JSON=1', language: 'cpp')
+endif
+
+if commons_with_ulid
+    ulid_dep = dependency('ulid', fallback: ['ulid', 'ulid_dep'])
+    commons_deps += ulid_dep
+    add_project_arguments('-DCOMMONS_WITH_ULID=1', language: 'cpp')
 endif
 
 # Emit a -D only for the Prioritized sentinels the build actually overrode.
@@ -60,6 +67,9 @@ install_subdir('include/commons',
 pkg_requires = []
 if commons_with_json
     pkg_requires += 'nlohmann_json'
+endif
+if commons_with_ulid
+    pkg_requires += 'ulid'
 endif
 
 import('pkgconfig').generate(

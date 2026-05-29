@@ -1,0 +1,8 @@
+[wrap-file]
+directory       = ulid-1.0.0
+source_url      = https://github.com/aurimasniekis/cpp-ulid/archive/refs/tags/v1.0.0.tar.gz
+source_filename = ulid-1.0.0.tar.gz
+source_hash     = 2c7cb1b67be889fd3a783aa1188b72545e1becc6f36cb25c7a7c6361177f1515
+
+[provide]
+ulid = ulid_dep

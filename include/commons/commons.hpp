@@ -13,6 +13,7 @@
 #include <commons/fixed_string.hpp>
 #include <commons/flag.hpp>
 #include <commons/icon.hpp>
+#include <commons/id.hpp>
 #include <commons/literals.hpp>
 #include <commons/origin.hpp>
 #include <commons/prioritized.hpp>

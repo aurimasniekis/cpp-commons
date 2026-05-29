@@ -75,9 +75,9 @@ TEST(Json, I128InvalidStringThrows) {
 }
 
 TEST(Json, I128SignRoundTrips) {
-    json j = "+42";
+    const json j = "+42";
     EXPECT_EQ(j.get<comms::i128>(), comms::i128{42});
-    json neg = "-42";
+    const json neg = "-42";
     EXPECT_EQ(neg.get<comms::i128>(), -comms::i128{42});
 }
 
@@ -228,7 +228,7 @@ TEST(Json, ComplexIntRoundTrip) {
 // nullopt ⇄ JSON null; a value travels via the wrapped T's own serializer.
 
 TEST(Json, OptionalWithValueSerializesAsInnerValue) {
-    const std::optional<int> opt = 7;
+    constexpr std::optional<int> opt = 7;
     const json j = opt;
     EXPECT_TRUE(j.is_number());
     EXPECT_EQ(j.dump(), "7");
@@ -236,7 +236,7 @@ TEST(Json, OptionalWithValueSerializesAsInnerValue) {
 }
 
 TEST(Json, OptionalNulloptSerializesAsNull) {
-    const std::optional<int> opt = std::nullopt;
+    constexpr std::optional<int> opt = std::nullopt;
     const json j = opt;
     EXPECT_TRUE(j.is_null());
     EXPECT_EQ(j.get<std::optional<int>>(), std::nullopt);
@@ -249,7 +249,7 @@ TEST(Json, OptionalNullJsonDeserializesToNullopt) {
 
 // The inner T reuses its own hooks — here a Commons type with a string mapping.
 TEST(Json, OptionalReusesInnerTypeHooks) {
-    const std::optional<comms::Color> opt = comms::Color::parse("#6366f1");
+    constexpr std::optional<comms::Color> opt = comms::Color::parse("#6366f1");
     const json j = opt;
     EXPECT_EQ(j.get<std::string>(), "#6366f1");
     EXPECT_EQ(j.get<std::optional<comms::Color>>(), opt);
@@ -386,6 +386,45 @@ TEST(Json, VersionConstraintInvalidThrows) {
     json j = "^x.y";
     EXPECT_THROW((void)j.get<comms::VersionConstraint>(), nlohmann::json::other_error);
 }
+
+// -- Id<Tag, Repr> -----------------------------------------------------------
+// Travels as the inner Repr's natural JSON — number for the uint reprs, string
+// for std::string, and (under COMMONS_WITH_ULID) the ULID string for ulid::Ulid.
+
+COMMONS_DEFINE_UINT64_ID(JsonUserId, "json.user");
+COMMONS_DEFINE_STRING_ID(JsonOrderId, "json.order");
+
+TEST(Json, IdUint64TravelsAsJsonNumber) {
+    const JsonUserId u{42u};
+    const json j = u;
+    EXPECT_TRUE(j.is_number_unsigned());
+    EXPECT_EQ(j.get<std::uint64_t>(), 42u);
+    EXPECT_EQ(j.get<JsonUserId>(), u);
+}
+
+TEST(Json, IdStringTravelsAsJsonString) {
+    const JsonOrderId o{std::string{"o-1"}};
+    const json j = o;
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), "o-1");
+    EXPECT_EQ(j.get<JsonOrderId>(), o);
+}
+
+#if COMMONS_WITH_ULID
+
+COMMONS_DEFINE_ULID_ID(JsonEventId, "json.event");
+
+TEST(Json, IdUlidTravelsAsJsonString) {
+    const auto parsed = ::ulid::Ulid::from_string("01H8XGQZ8E4Q7M5GZP9X8R3D7K");
+    ASSERT_TRUE(parsed.has_value());
+    const JsonEventId e{*parsed};
+    const json j = e;
+    EXPECT_TRUE(j.is_string());
+    EXPECT_EQ(j.get<std::string>(), "01H8XGQZ8E4Q7M5GZP9X8R3D7K");
+    EXPECT_EQ(j.get<JsonEventId>(), e);
+}
+
+#endif
 
 // -- IOrigin / OriginPtr -----------------------------------------------------
 // An origin travels as {"kind", ...fields}; OriginPtr null ⇄ JSON null; an

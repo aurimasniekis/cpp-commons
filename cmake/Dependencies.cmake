@@ -14,6 +14,19 @@ if(COMMONS_WITH_NLOHMANN_JSON)
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
+if(COMMONS_WITH_ULID)
+    set(ULID_BUILD_TESTS      OFF CACHE INTERNAL "")
+    set(ULID_BUILD_BENCHMARKS OFF CACHE INTERNAL "")
+    FetchContent_Declare(
+        ulid
+        URL      https://github.com/aurimasniekis/cpp-ulid/archive/refs/tags/v1.0.0.tar.gz
+        URL_HASH SHA256=2c7cb1b67be889fd3a783aa1188b72545e1becc6f36cb25c7a7c6361177f1515
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        FIND_PACKAGE_ARGS 1.0.0
+    )
+    FetchContent_MakeAvailable(ulid)
+endif()
+
 if(COMMONS_BUILD_TESTS)
     set(INSTALL_GTEST OFF CACHE INTERNAL "")
     set(BUILD_GMOCK   OFF CACHE INTERNAL "")

@@ -30,10 +30,11 @@ option(COMMONS_ENABLE_COVERAGE     "Build with Clang source-based coverage" OFF)
 option(COMMONS_WARNINGS_AS_ERRORS  "Treat compiler warnings as errors"    ${PROJECT_IS_TOP_LEVEL})
 option(COMMONS_INSTALL             "Generate install rules for commons"   ${PROJECT_IS_TOP_LEVEL})
 
-# Optional integrations default OFF: the headers auto-detect nlohmann/json via
-# __has_include, so the base library forces no dependency. Turning this ON
-# additionally fetches/links the dependency and hard-defines the gate macro.
+# Optional integrations default OFF: the headers auto-detect nlohmann/json /
+# ulid via __has_include, so the base library forces no dependency. Turning a
+# gate ON additionally fetches/links the dependency and hard-defines its macro.
 option(COMMONS_WITH_NLOHMANN_JSON  "Force-enable nlohmann/json integration (fetches the dependency)" OFF)
+option(COMMONS_WITH_ULID           "Force-enable ulid::Ulid Id repr (fetches the dependency)"        OFF)
 
 # Override seams for comms::Prioritized's sentinel values. The defaults are
 # numeric_limits-based and have no CMake literal, so the C++ header default is
@@ -72,6 +73,11 @@ target_compile_features(commons INTERFACE cxx_std_23)
 if(COMMONS_WITH_NLOHMANN_JSON AND TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(commons INTERFACE nlohmann_json::nlohmann_json)
     target_compile_definitions(commons INTERFACE COMMONS_WITH_NLOHMANN_JSON=1)
+endif()
+
+if(COMMONS_WITH_ULID AND TARGET ulid::ulid)
+    target_link_libraries(commons INTERFACE ulid::ulid)
+    target_compile_definitions(commons INTERFACE COMMONS_WITH_ULID=1)
 endif()
 
 # Emit a -D only for the Prioritized sentinels the consumer actually overrode.
@@ -140,6 +146,15 @@ if(COMMONS_INSTALL AND DEFINED nlohmann_json_SOURCE_DIR)
         "commons: COMMONS_INSTALL disabled — a fetched dependency (nlohmann_json) "
         "cannot be re-exported. Install it via system package or find_package, or "
         "leave COMMONS_WITH_NLOHMANN_JSON OFF, to re-enable install rules."
+    )
+    set(COMMONS_INSTALL OFF)
+endif()
+
+if(COMMONS_INSTALL AND DEFINED ulid_SOURCE_DIR)
+    message(STATUS
+        "commons: COMMONS_INSTALL disabled — a fetched dependency (ulid) cannot "
+        "be re-exported. Install it via system package or find_package, or leave "
+        "COMMONS_WITH_ULID OFF, to re-enable install rules."
     )
     set(COMMONS_INSTALL OFF)
 endif()
