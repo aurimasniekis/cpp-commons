@@ -10,6 +10,7 @@
 #include <commons/color.hpp>
 #include <commons/config.hpp>
 #include <commons/display_info.hpp>
+#include <commons/exception.hpp>
 #include <commons/fixed_string.hpp>
 #include <commons/flag.hpp>
 #include <commons/icon.hpp>
@@ -17,6 +18,7 @@
 #include <commons/literals.hpp>
 #include <commons/origin.hpp>
 #include <commons/prioritized.hpp>
+#include <commons/reason.hpp>
 #include <commons/semver.hpp>
 #include <commons/types.hpp>
 #include <commons/version.hpp>

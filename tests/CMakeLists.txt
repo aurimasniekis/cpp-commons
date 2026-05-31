@@ -11,6 +11,7 @@ set(_commons_test_sources
     test_display_info.cpp
     test_flag.cpp
     test_origin.cpp
+    test_reason.cpp
     test_prioritized.cpp
     test_semver.cpp
     test_version_constraint.cpp

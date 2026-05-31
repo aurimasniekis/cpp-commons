@@ -12,6 +12,7 @@ commons_add_example(commons_display_info display_info.cpp)
 commons_add_example(commons_flag flag.cpp)
 commons_add_example(commons_id id.cpp)
 commons_add_example(commons_origin origin.cpp)
+commons_add_example(commons_reason reason.cpp)
 commons_add_example(commons_prioritized prioritized.cpp)
 commons_add_example(commons_semver semver.cpp)
 

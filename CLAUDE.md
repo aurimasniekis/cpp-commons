@@ -101,6 +101,52 @@ otherwise). `WithPriority<T>` and `PrioritizedSet<T>` get JSON hooks gated on `T
 itself being json-serializable. The three sentinel *values* are `static constexpr`
 members overridable at build time — see the override-seam note below.
 
+`comms::Exception` (`exception.hpp`) is the **root of the Commons exception
+hierarchy** — a thin `std::runtime_error` subclass so every Commons-thrown
+exception is catchable as one type. Feature-specific exceptions derive from it
+(or a more specific Commons exception); they live next to the feature that
+throws them.
+
+`comms::IReason` (`reason.hpp`) is a polymorphic **"why" envelope** for an
+outcome that is *not* an exception (a reject, a cancel, a refusal): it carries a
+numeric `code`, a `message`, and a `created_at` timestamp, and — exactly like
+`IOrigin` — is an **open set** keyed by a `kind()` discriminator supplied via the
+`ReasonKind<"kind", Derived>` CRTP base (which wires `clone()` and an *optional*
+`DisplayInfo`-backed `info()` — a kind with no `display_info()` gets an empty
+one). `comms::IFailureReason` refines it for a **developer-controlled failure**
+(code deliberately submitting a failure, not an exception), adding
+`throw_as_exception()`. Built-in kinds: `GenericReason`/`UnknownReason` and the
+failure counterparts `GenericFailureReason`/`UnknownFailureReason`; `ReasonPtr` /
+`FailureReasonPtr` are the owning handles and `make_reason<R>` /
+`make_failure_reason<R>` the factories (defaulting to the generic kinds). A free
+`operator<=>` orders reasons by `created_at`. Text output (`to_string`/`<<`/
+`std::format`) emits `title: message`, where the virtual `title()` defaults to the
+concrete type name (demangled, e.g. `RateLimitReason`) — the generic/unknown
+built-ins override it to append their code (`GenericReason(123)`). The registry
+filters by family: `kinds()` (all), `failure_kinds()` / `non_failure_kinds()`,
+and the generic `kinds_of<Base>()` for a custom `IReason` sub-interface (the way
+`IFailureReason` refines `IReason`). The one-line
+`COMMONS_DEFINE_REASON(Ident,"kind")` / `COMMONS_DEFINE_FAILURE_REASON(...)`
+macros define **and** register a kind (inheriting the `ReasonKind` constructors
+`()`/`(message)`/`(code)`/`(code,message)`); hand-write the class only for a
+baked-in default or a `display_info()`. New kinds self-register into the
+program-wide `GlobalReasonRegistry` via `COMMONS_REGISTER_REASON(Type)` (mirroring
+`GlobalOriginRegistry`). The reason exceptions sit under `comms::Exception`:
+`ReasonException` (carries any `IReason`) → `FailureReasonException` (carries an
+`IFailureReason`, thrown by `throw_as_exception()`), with `RejectException` /
+`CancelException` as sibling `ReasonException`s. A reason round-trips as
+`{"kind","code","message","created_at"}` (timestamp as epoch milliseconds).
+**Reason is the one exception to the "JSON lives only in `json.hpp`" rule:** the
+per-field (de)serializers are the **virtual** `IReason::write_json` / `read_json`
+hooks *in `reason.hpp`*, gated by `COMMONS_WITH_NLOHMANN_JSON` (so nlohmann is
+still pulled only when present) — a sub-reason adds its own fields by overriding
+them (calling the base first) and they round-trip through `ReasonPtr`
+automatically. `json.hpp` only carries the `adl_serializer<ReasonPtr>` /
+`adl_serializer<FailureReasonPtr>` that resolve `kind` through the registry and
+drive those hooks. Because the gate adds virtual members it changes `IReason`'s
+vtable, so **every TU in a build must resolve `COMMONS_WITH_NLOHMANN_JSON`
+identically** (force it with a `-D` if the build is mixed).
+
 ## Feature gates (live in `commons/config.hpp`)
 
 Each optional integration is a `COMMONS_WITH_*` macro resolving to `1`/`0`:
@@ -142,7 +188,12 @@ When adding a type, also add, guarded by the matching macro:
   `commons/json.hpp`. Class types: free ADL functions in namespace `comms`.
   Fundamental types (e.g. the 128-bit aliases): an
   `nlohmann::adl_serializer<T>` specialization — ADL cannot find free functions
-  for builtins.
+  for builtins. *Sole exception:* `reason.hpp` keeps its per-field
+  (de)serialization in **gated virtual hooks on `IReason`** (so a polymorphic,
+  open-set type's subkinds can extend the JSON by overriding); `json.hpp` then
+  only holds the `adl_serializer<ReasonPtr>` glue. Do this only for a
+  polymorphic open set that genuinely needs subclass-extensible JSON, and
+  document the vtable/uniform-gate caveat.
 
 Then: register the type's tests in `tests/CMakeLists.txt` + `tests/meson.build`
 (append the integration test under the `COMMONS_WITH_*` / `commons_with_*`

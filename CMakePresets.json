@@ -11,7 +11,9 @@
       "displayName": "Debug",
       "binaryDir": "${sourceDir}/build/debug",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "COMMONS_WITH_NLOHMANN_JSON": "ON",
+        "COMMONS_WITH_ULID": "ON"
       }
     },
     {

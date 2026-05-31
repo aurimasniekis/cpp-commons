@@ -6,6 +6,7 @@ commons_examples = {
     'commons_flag': 'flag.cpp',
     'commons_id': 'id.cpp',
     'commons_origin': 'origin.cpp',
+    'commons_reason': 'reason.cpp',
     'commons_prioritized': 'prioritized.cpp',
     'commons_semver': 'semver.cpp',
 }

@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -468,6 +470,107 @@ TEST(Json, OriginPtrUnknownKindThrows) {
 TEST(Json, OriginPtrMissingKindThrows) {
     const json j = json::object();
     EXPECT_THROW((void)j.get<comms::OriginPtr>(), nlohmann::json::other_error);
+}
+
+// -- Reason / FailureReason --------------------------------------------------
+
+// A sub-reason with an extra field, round-tripped through ReasonPtr by
+// overriding the virtual write_json/read_json hooks (gated in reason.hpp).
+class RetryAfterReason final : public comms::FailureReasonKind<"retry_after", RetryAfterReason> {
+public:
+    using comms::FailureReasonKind<"retry_after", RetryAfterReason>::ReasonKind;
+    int retry_after_ms = 0;
+
+    void write_json(nlohmann::json& j) const override {
+        comms::IReason::write_json(j);  // kind/code/message/created_at
+        j["retry_after_ms"] = retry_after_ms;
+    }
+    void read_json(const nlohmann::json& j) override {
+        comms::IReason::read_json(j);
+        if (const auto it = j.find("retry_after_ms"); it != j.end() && !it->is_null()) {
+            it->get_to(retry_after_ms);
+        }
+    }
+};
+COMMONS_REGISTER_REASON(RetryAfterReason);
+
+TEST(Json, SubReasonCustomFieldRoundTripsThroughPointers) {
+    auto r = comms::make_failure_reason<RetryAfterReason>(429, "slow down");
+    static_cast<RetryAfterReason&>(*r).retry_after_ms = 1500;
+
+    // Serialize through FailureReasonPtr — the virtual write_json adds the field.
+    const json j = r;
+    EXPECT_EQ(j.at("kind").get<std::string>(), "retry_after");
+    EXPECT_EQ(j.at("retry_after_ms").get<int>(), 1500);
+
+    // Read back through the base ReasonPtr: the registry rebuilds the concrete
+    // kind and read_json restores the custom field.
+    const auto back = j.get<comms::ReasonPtr>();
+    ASSERT_NE(back, nullptr);
+    auto* typed = dynamic_cast<RetryAfterReason*>(back.get());
+    ASSERT_NE(typed, nullptr);
+    EXPECT_EQ(typed->code, 429);
+    EXPECT_EQ(typed->message, "slow down");
+    EXPECT_EQ(typed->retry_after_ms, 1500);
+}
+
+TEST(Json, ReasonPtrRoundTripsFields) {
+    auto r = comms::make_reason(418, "teapot");
+    const auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(r->created_at.time_since_epoch())
+            .count();
+    const json j = r;
+    EXPECT_EQ(j.at("kind").get<std::string>(), "generic");
+    EXPECT_EQ(j.at("code").get<int>(), 418);
+    EXPECT_EQ(j.at("message").get<std::string>(), "teapot");
+    EXPECT_EQ(j.at("created_at").get<std::int64_t>(), ms);
+
+    const auto back = j.get<comms::ReasonPtr>();
+    ASSERT_NE(back, nullptr);
+    EXPECT_EQ(back->kind(), "generic");
+    EXPECT_EQ(back->code, 418);
+    EXPECT_EQ(back->message, "teapot");
+    // The wire format is epoch-milliseconds, so the timestamp round-trips to
+    // millisecond precision (sub-millisecond ticks are truncated).
+    const auto truncated = comms::ReasonClock::time_point{
+        std::chrono::duration_cast<std::chrono::milliseconds>(r->created_at.time_since_epoch())};
+    EXPECT_EQ(back->created_at, truncated);
+}
+
+TEST(Json, FailureReasonPtrRoundTrips) {
+    const comms::FailureReasonPtr r =
+        comms::make_failure_reason<comms::UnknownFailureReason>(7, "boom");
+    const json j = r;
+    EXPECT_EQ(j.at("kind").get<std::string>(), "unknown_failure");
+
+    const auto back = j.get<comms::FailureReasonPtr>();
+    ASSERT_NE(back, nullptr);
+    EXPECT_EQ(back->kind(), "unknown_failure");
+    EXPECT_EQ(back->code, 7);
+}
+
+TEST(Json, FailureReasonPtrRejectsPlainReasonKind) {
+    // "generic" is a reason but not a failure reason: deserializing into a
+    // FailureReasonPtr must fail.
+    const auto j = json{{"kind", "generic"}, {"code", 0}, {"message", "x"}};
+    EXPECT_THROW((void)j.get<comms::FailureReasonPtr>(), nlohmann::json::other_error);
+}
+
+TEST(Json, ReasonPtrNullIsJsonNull) {
+    constexpr comms::ReasonPtr r;  // null
+    const json j = r;
+    EXPECT_TRUE(j.is_null());
+    EXPECT_EQ(j.get<comms::ReasonPtr>(), nullptr);
+}
+
+TEST(Json, ReasonPtrUnknownKindThrows) {
+    const auto j = json{{"kind", "mystery"}};
+    EXPECT_THROW((void)j.get<comms::ReasonPtr>(), nlohmann::json::other_error);
+}
+
+TEST(Json, ReasonPtrMissingKindThrows) {
+    const json j = json::object();
+    EXPECT_THROW((void)j.get<comms::ReasonPtr>(), nlohmann::json::other_error);
 }
 
 }  // namespace

@@ -302,6 +302,51 @@ prefixes it with `Tag::name` for named tags; and the `std::formatter<Id>`
 specialization inherits from `std::formatter<Repr>` so any spec the wrapped
 type accepts (e.g. `"{:#x}"` for the uint reprs) works transparently.
 
+### `comms::Exception`
+
+The root of the Commons exception hierarchy — a thin `std::runtime_error`
+subclass that exists so every exception the library throws is catchable as one
+type (`catch (const comms::Exception&)`). Feature-specific exceptions derive from
+it; the reason exceptions below are the first family.
+
+### `comms::IReason` / `comms::IFailureReason`
+
+A polymorphic *"why" envelope* for an outcome that is **not** an exception — a
+rejected request, a cancelled job, a refused operation. It carries an `int code`,
+a `std::string message`, and a `created_at` timestamp, and — like `IOrigin` — it
+is an **open set**: each kind has a compile-time `kind()` discriminator via the
+`ReasonKind<"kind", Derived>` CRTP base, which wires `clone()` and an *optional*
+`DisplayInfo`-backed `info()`. `comms::IFailureReason` refines it for a
+**developer-controlled failure** (code that deliberately submits a failure rather
+than throwing), adding `throw_as_exception()`. Built-ins are
+`GenericReason`/`UnknownReason` and the failure counterparts
+`GenericFailureReason`/`UnknownFailureReason`; `ReasonPtr` / `FailureReasonPtr`
+are the owning handles and `make_reason<R>` / `make_failure_reason<R>` the
+factories. The one-line `COMMONS_DEFINE_REASON(Ident, "kind")` /
+`COMMONS_DEFINE_FAILURE_REASON(Ident, "kind")` macros define **and** register a
+kind (inheriting the `ReasonKind` constructors `()`/`(message)`/`(code)`/
+`(code, message)`); hand-write the class only for a baked-in default or a
+`display_info()`. New kinds self-register into the `GlobalReasonRegistry` with
+`COMMONS_REGISTER_REASON(Type)`, which also filters by family: `kinds()`,
+`failure_kinds()` / `non_failure_kinds()`, and the generic `kinds_of<Base>()` for
+a custom `IReason` sub-interface. A free `operator<=>` orders reasons by
+`created_at`. Text output (`to_string`/`<<`/`std::format`) emits `title: message`,
+where the virtual `title()` defaults to the concrete type name (`RateLimitReason`)
+and the generic/unknown built-ins override it to carry their code
+(`GenericReason(123)`). The reason exceptions sit under `comms::Exception`:
+`ReasonException` (carries any reason) → `FailureReasonException` (thrown by
+`throw_as_exception()`), with `RejectException` / `CancelException` as siblings.
+
+JSON (when `COMMONS_WITH_NLOHMANN_JSON` is on) round-trips a reason as
+`{"kind","code","message","created_at"}`, resolving `kind` through the registry,
+so a `ReasonPtr` deserializes back to the right concrete kind. A **sub-reason
+with extra fields** extends the JSON by overriding the gated virtual
+`IReason::write_json` / `read_json` hooks (calling the base first) — its fields
+then round-trip through `ReasonPtr` automatically. These hooks live in
+`reason.hpp` (gated), the one place the library puts serialization in a type
+header rather than in `json.hpp`; the trade-off is that the JSON gate must be
+resolved identically across your whole build (it affects `IReason`'s vtable).
+
 ## Common usage patterns
 
 ### Working with colors
@@ -604,6 +649,52 @@ int main() {
     // Different tags are unrelated types — won't compile:
     // bool same = (u == UserId{0u});                // OK
     // bool same = (u == OrderId{"o-abc-1"});        // type mismatch
+}
+```
+
+### Explaining outcomes with reasons
+
+```cpp
+#include <commons/reason.hpp>
+
+#include <iostream>
+
+// Define + register a domain-specific failure kind in one line. It inherits the
+// ReasonKind constructors, so make_failure_reason<RateLimitReason>(429, "…")
+// just works.
+COMMONS_DEFINE_FAILURE_REASON(RateLimitReason, "rate_limit");
+
+int main() {
+    namespace c = comms;
+
+    // A reason answers "why?" for a non-exceptional outcome.
+    const c::GenericReason rejected{403, "not allowed"};
+    std::cout << c::to_string(rejected) << "\n";   // GenericReason(403): not allowed
+
+    // A custom kind titles itself by its type name (no code).
+    std::cout << c::to_string(RateLimitReason{}) << "\n";   // RateLimitReason:
+
+    // A FailureReason is a developer-submitted failure. Where there is no
+    // failure channel, throw_as_exception() packages it; a handler resubmits.
+    try {
+        RateLimitReason{429, "slow down"}.throw_as_exception();
+    } catch (const c::FailureReasonException& e) {
+        std::cout << "caught: " << e.what()
+                  << " (code " << e.failure_reason()->code << ")\n";
+    }
+
+    // Reject/Cancel exceptions carry any reason; all derive from comms::Exception.
+    try {
+        throw c::CancelException(c::GenericReason{"user cancelled"});
+    } catch (const c::Exception& e) {
+        std::cout << "cancelled: " << e.what() << "\n";
+    }
+
+    // Filter the registry by family.
+    const auto& reg = c::GlobalReasonRegistry::instance();
+    for (const auto& k : reg.failure_kinds()) {
+        std::cout << "failure kind: " << k << "\n";
+    }
 }
 ```
 
