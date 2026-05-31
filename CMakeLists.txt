@@ -44,6 +44,9 @@ set(COMMONS_PRIORITIZED_HIGHEST_PRECEDENCE "" CACHE STRING "Override comms::Prio
 set(COMMONS_PRIORITIZED_LOWEST_PRECEDENCE  "" CACHE STRING "Override comms::Prioritized::LOWEST_PRECEDENCE")
 set(COMMONS_PRIORITIZED_DEFAULT_PRIORITY   "" CACHE STRING "Override comms::Prioritized::DEFAULT_PRIORITY")
 
+# Override seam for comms::AuditLog's default capacity (same shape as above).
+set(COMMONS_AUDIT_RECORDS_CAPACITY         "" CACHE STRING "Override comms::AuditLog default capacity")
+
 include(CompilerWarnings)
 include(Sanitizers)
 include(Coverage)
@@ -80,11 +83,12 @@ if(COMMONS_WITH_ULID AND TARGET ulid::ulid)
     target_compile_definitions(commons INTERFACE COMMONS_WITH_ULID=1)
 endif()
 
-# Emit a -D only for the Prioritized sentinels the consumer actually overrode.
+# Emit a -D only for the value-override seams the consumer actually overrode.
 foreach(_v
     COMMONS_PRIORITIZED_HIGHEST_PRECEDENCE
     COMMONS_PRIORITIZED_LOWEST_PRECEDENCE
-    COMMONS_PRIORITIZED_DEFAULT_PRIORITY)
+    COMMONS_PRIORITIZED_DEFAULT_PRIORITY
+    COMMONS_AUDIT_RECORDS_CAPACITY)
     if(NOT "${${_v}}" STREQUAL "")
         target_compile_definitions(commons INTERFACE ${_v}=${${_v}})
     endif()

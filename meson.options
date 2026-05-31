@@ -9,3 +9,6 @@ option('ulid',     type: 'boolean', value: false, description: 'Force-enable uli
 option('prioritized_highest_precedence', type: 'string', value: '', description: 'Override comms::Prioritized::HIGHEST_PRECEDENCE')
 option('prioritized_lowest_precedence',  type: 'string', value: '', description: 'Override comms::Prioritized::LOWEST_PRECEDENCE')
 option('prioritized_default_priority',   type: 'string', value: '', description: 'Override comms::Prioritized::DEFAULT_PRIORITY')
+
+# Override seam for comms::AuditLog's default capacity (same shape as above).
+option('audit_records_capacity',         type: 'string', value: '', description: 'Override comms::AuditLog default capacity')

@@ -41,6 +41,7 @@ prioritized_overrides = {
     'prioritized_highest_precedence': 'COMMONS_PRIORITIZED_HIGHEST_PRECEDENCE',
     'prioritized_lowest_precedence': 'COMMONS_PRIORITIZED_LOWEST_PRECEDENCE',
     'prioritized_default_priority': 'COMMONS_PRIORITIZED_DEFAULT_PRIORITY',
+    'audit_records_capacity': 'COMMONS_AUDIT_RECORDS_CAPACITY',
 }
 foreach optname, macroname : prioritized_overrides
     optval = get_option(optname)

@@ -13,6 +13,14 @@
 /// sub-headers, so it compiles standalone) and is then `#include`d here.
 ///
 /// What it adds:
+///   - `AuditRecord` ⇄ JSON **object**: always `username` + `timestamp` (epoch
+///     milliseconds); `ip`/`user_agent`/`session_id` only when present, and
+///     `related_ids` (a `{name:id}` object) / `metadata` only when non-empty.
+///   - `ChangeAuditRecord<T>` ⇄ the base fields plus `before` / `after` (only
+///     when present), when `T` is itself json-serializable.
+///   - `AuditLog<Record>` (the `AuditRecords` / `ChangeAuditRecords<T>` aliases)
+///     ⇄ a JSON **array** of records; the capacity is not serialized, so a log
+///     read back under a smaller cap keeps the newest N.
 ///   - `FixedString<N>` ⇄ JSON string. A string that does not fit the
 ///     fixed `N` capacity throws on parse.
 ///   - `Color` ⇄ JSON **hex string** (`#RRGGBB`, or `#RRGGBBAA` when not
@@ -59,6 +67,7 @@
 /// `isize`) need nothing here: nlohmann already serializes the underlying
 /// arithmetic types natively.
 
+#include <commons/json/audit_record.hpp>
 #include <commons/json/color.hpp>
 #include <commons/json/display_info.hpp>
 #include <commons/json/fixed_string.hpp>

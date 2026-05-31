@@ -596,4 +596,177 @@ TEST(Json, ReasonPtrMissingKindThrows) {
     EXPECT_THROW((void)j.get<comms::ReasonPtr>(), nlohmann::json::other_error);
 }
 
+// -- AuditRecord ------------------------------------------------------------
+
+COMMONS_DEFINE_UINT64_ID(JsonAuditOrderId, "audit.order");
+COMMONS_DEFINE_STRING_ID(JsonAuditTenantId, "audit.tenant");
+
+// A ms-aligned timestamp so the millisecond JSON encoding round-trips exactly.
+comms::AuditClock::time_point audit_ts() {
+    return comms::AuditClock::time_point{std::chrono::milliseconds{1'700'000'000'123}};
+}
+
+TEST(Json, AuditRecordFullRoundTrip) {
+    comms::AuditRecord r;
+    r.username = "alice";
+    r.timestamp = audit_ts();
+    r.ip = "192.0.2.1";
+    r.user_agent = "curl/8.0";
+    r.set_session_id(JsonAuditOrderId{42U});
+    r.add_related_id("order", JsonAuditOrderId{7U});
+    r.metadata["attempt"] = comms::md::Value{3};
+
+    const json j = r;
+    EXPECT_EQ(j.at("username").get<std::string>(), "alice");
+    EXPECT_EQ(j.at("session_id").get<std::string>(), "42");
+
+    const auto back = j.get<comms::AuditRecord>();
+    EXPECT_EQ(back, r);
+}
+
+TEST(Json, AuditRecordOmitsAbsentFields) {
+    comms::AuditRecord r;
+    r.username = "bob";
+    r.timestamp = audit_ts();
+
+    const json j = r;
+    EXPECT_TRUE(j.contains("username"));
+    EXPECT_TRUE(j.contains("timestamp"));
+    EXPECT_FALSE(j.contains("ip"));
+    EXPECT_FALSE(j.contains("user_agent"));
+    EXPECT_FALSE(j.contains("session_id"));
+    EXPECT_FALSE(j.contains("related_ids"));
+    EXPECT_FALSE(j.contains("metadata"));
+
+    const auto back = j.get<comms::AuditRecord>();
+    EXPECT_EQ(back, r);
+}
+
+TEST(Json, AuditRecordTimestampMillis) {
+    comms::AuditRecord r;
+    r.username = "carol";
+    r.timestamp = audit_ts();
+
+    const json j = r;
+    EXPECT_EQ(j.at("timestamp").get<std::int64_t>(), 1'700'000'000'123);
+}
+
+TEST(Json, AuditRecordRelatedIdsRoundTrip) {
+    comms::AuditRecord r;
+    r.username = "dave";
+    r.timestamp = audit_ts();
+    r.add_related_id("order", JsonAuditOrderId{7U});
+    r.add_related_id("tenant", JsonAuditTenantId{"acme"});
+
+    const json j = r;
+    ASSERT_TRUE(j.contains("related_ids"));
+    EXPECT_EQ(j.at("related_ids").at("order").get<std::string>(), "7");
+    EXPECT_EQ(j.at("related_ids").at("tenant").get<std::string>(), "acme");
+
+    const auto back = j.get<comms::AuditRecord>();
+    EXPECT_EQ(back.related_ids, r.related_ids);
+}
+
+TEST(Json, AuditRecordMetadataRoundTrip) {
+    comms::AuditRecord r;
+    r.username = "erin";
+    r.timestamp = audit_ts();
+    r.metadata["endpoint"] = comms::md::Value{"/v1/items"};
+    r.metadata["attempt"] = comms::md::Value{3};
+
+    const json j = r;
+    ASSERT_TRUE(j.contains("metadata"));
+
+    const auto back = j.get<comms::AuditRecord>();
+    EXPECT_EQ(back.metadata, r.metadata);
+}
+
+TEST(Json, AuditRecordNullFieldBecomesNullopt) {
+    const auto j = json{{"username", "frank"}, {"timestamp", 1'700'000'000'123}, {"ip", nullptr}};
+    const auto r = j.get<comms::AuditRecord>();
+    EXPECT_EQ(r.username, "frank");
+    EXPECT_FALSE(r.ip.has_value());
+}
+
+// -- ChangeAuditRecord ------------------------------------------------------
+
+TEST(Json, ChangeAuditRecordRoundTripBothPresent) {
+    comms::ChangeAuditRecord<int> r;
+    r.username = "alice";
+    r.timestamp = audit_ts();
+    r.before = 10;
+    r.after = 20;
+
+    const json j = r;
+    EXPECT_EQ(j.at("username").get<std::string>(), "alice");  // base field co-serializes
+    EXPECT_EQ(j.at("before").get<int>(), 10);
+    EXPECT_EQ(j.at("after").get<int>(), 20);
+
+    const auto back = j.get<comms::ChangeAuditRecord<int>>();
+    EXPECT_EQ(back, r);
+}
+
+TEST(Json, ChangeAuditRecordOmitsAbsentBeforeAfter) {
+    comms::ChangeAuditRecord<int> r;  // create: only `after`
+    r.username = "bob";
+    r.timestamp = audit_ts();
+    r.after = 5;
+
+    const json j = r;
+    EXPECT_FALSE(j.contains("before"));
+    ASSERT_TRUE(j.contains("after"));
+
+    const auto back = j.get<comms::ChangeAuditRecord<int>>();
+    EXPECT_EQ(back, r);
+}
+
+TEST(Json, ChangeAuditRecordStructValueRoundTrip) {
+    comms::ChangeAuditRecord<std::string> r;
+    r.username = "carol";
+    r.timestamp = audit_ts();
+    r.before = std::string{"old"};
+    r.after = std::string{"new"};
+
+    const json j = r;
+    const auto back = j.get<comms::ChangeAuditRecord<std::string>>();
+    EXPECT_EQ(back, r);
+}
+
+// -- AuditLog ---------------------------------------------------------------
+
+TEST(Json, AuditRecordsArrayRoundTrip) {
+    comms::AuditRecords log{5};  // cap above the element count → exact round-trip
+    comms::AuditRecord a;
+    a.username = "a";
+    a.timestamp = audit_ts();
+    comms::AuditRecord b;
+    b.username = "b";
+    b.timestamp = audit_ts();
+    log.push(a);
+    log.push(b);
+
+    const json j = log;
+    ASSERT_TRUE(j.is_array());
+    EXPECT_EQ(j.size(), 2U);
+
+    const auto back = j.get<comms::AuditRecords>();
+    EXPECT_EQ(back.records(), log.records());
+}
+
+TEST(Json, ChangeAuditRecordsArrayRoundTrip) {
+    comms::ChangeAuditRecords<int> log{5};
+    comms::ChangeAuditRecord<int> r;
+    r.username = "a";
+    r.timestamp = audit_ts();
+    r.after = 1;
+    log.push(r);
+
+    const json j = log;
+    ASSERT_TRUE(j.is_array());
+    EXPECT_EQ(j.size(), 1U);
+
+    const auto back = j.get<comms::ChangeAuditRecords<int>>();
+    EXPECT_EQ(back.records(), log.records());
+}
+
 }  // namespace

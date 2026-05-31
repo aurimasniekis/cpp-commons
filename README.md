@@ -372,6 +372,39 @@ then round-trip through `ReasonPtr` automatically. These hooks live in
 header rather than in `json.hpp`; the trade-off is that the JSON gate must be
 resolved identically across your whole build (it affects `IReason`'s vtable).
 
+### `comms::AuditRecord` family
+
+A small family of value types for an **audit trail** — *who* did *what*, *when*,
+*from where*. `comms::AuditRecord` is the base record: a required `username`, a
+`timestamp` (a real `time_point` defaulting to `now()`, like
+`IReason::created_at`), optional request context (`ip`, `user_agent`,
+`session_id`), a `related_ids` map (name → id string), and a free-form
+`metadata` bag (`comms::Metadata`, empty by default). Ids are stored as
+**strings**: the templated `set_session_id(id)` / `add_related_id(name, id)`
+helpers take any `comms::Id<Tag, Repr>` and capture `comms::to_string(id)`, so a
+single record can reference ids of different kinds (which a heterogeneous
+`map<string, Id>` could not). Records compare with `operator==` only — `Metadata`
+is equality-only, so there is no defaulted `<=>`.
+
+`comms::ChangeAuditRecord<T>` extends the base with `before` / `after`, each a
+`std::optional<T>` (a create has no `before`, a delete has no `after`); it
+inherits every field and helper. `comms::AuditLog<Record>` is a capped,
+insertion-ordered collection: `push()` appends and, once the size exceeds the
+capacity, drops the oldest (front) records (FIFO; capacity `0` keeps nothing).
+The cap is a runtime member defaulting to `COMMONS_AUDIT_RECORDS_CAPACITY` (a
+build/config **value-override seam**, default 3, wired exactly like the
+`COMMONS_PRIORITIZED_*` macros). `AuditRecords` and `ChangeAuditRecords<T>` are
+the two ready-made aliases.
+
+JSON (when `COMMONS_WITH_NLOHMANN_JSON` is on): an `AuditRecord` is an object
+that always carries `username` + `timestamp` (epoch milliseconds), with the
+optional fields emitted only when present/non-empty; a `ChangeAuditRecord<T>`
+adds `before` / `after`; an `AuditLog` is a JSON array of records. Capacity is
+**not** serialized, so a log read back under a smaller cap keeps the newest N (a
+within-capacity log round-trips exactly). The millisecond encoding truncates
+sub-millisecond ticks, so use ms-aligned timestamps when an exact round-trip
+matters.
+
 ## Common usage patterns
 
 ### Working with colors
@@ -758,6 +791,48 @@ int main() {
 }
 ```
 
+### Recording audit trails
+
+```cpp
+#include <commons/audit_record.hpp>
+
+#include <iostream>
+#include <string>
+
+COMMONS_DEFINE_UINT64_ID(OrderId, "order");
+COMMONS_DEFINE_STRING_ID(TenantId, "tenant");
+
+int main() {
+    namespace c = comms;
+
+    // who / what / when / from where. username is required; timestamp defaults
+    // to now(); the rest are optional.
+    c::AuditRecord rec;
+    rec.username = "alice";
+    rec.ip = "192.0.2.1";
+    rec.set_session_id(OrderId{42});               // stored as "42"
+    rec.add_related_id("order", OrderId{1001});    // ids of any kind, by string
+    rec.add_related_id("tenant", TenantId{"acme"});
+    rec.metadata["action"] = c::md::Value{"checkout"};
+
+    // before/after for a change; absent on create/delete respectively.
+    c::ChangeAuditRecord<std::string> change;
+    change.username = "bob";
+    change.before = std::string{"pending"};
+    change.after = std::string{"shipped"};
+
+    // A capped log drops the oldest once it overflows (FIFO).
+    c::AuditRecords log{2};                         // hold at most 2
+    for (const auto* who : {"alice", "bob", "carol"}) {
+        c::AuditRecord r;
+        r.username = who;
+        log.push(std::move(r));
+    }
+    std::cout << log.size() << " kept, oldest is "
+              << log.front().username << "\n";       // 2 kept, oldest is bob
+}
+```
+
 ### JSON serialization (optional)
 
 With nlohmann/json available, every public type gains `to_json`/`from_json`.
@@ -802,7 +877,10 @@ unknown kind throws; a custom kind brings its own `to_json`/`from_json`);
 `PrioritizedSet<T>` ⇄ a sorted array — both only when `T` is itself
 JSON-serializable; `Id<Tag, Repr>` ⇄ the inner `Repr`'s natural JSON (a number
 for the uint reprs, a string for `std::string`, the ULID string when ULID is
-also enabled).
+also enabled); `AuditRecord` ⇄ an object with `username` + millisecond
+`timestamp` and the optional fields omitted when absent/empty,
+`ChangeAuditRecord<T>` adds `before`/`after`, and `AuditLog<Record>` ⇄ a JSON
+array of records (capacity is not serialized).
 
 ## Error handling
 
@@ -880,45 +958,47 @@ synchronized; treat concurrent mutation as unsafe.
 
 ## API overview
 
-| Header                           | Provides                                                                                                                                                                                    |
-|----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `commons/commons.hpp`            | Umbrella header (all core types + JSON hooks).                                                                                                                                              |
-| `commons/version.hpp`            | Generated from `version.hpp.in` by the build: `COMMONS_VERSION_MAJOR/MINOR/PATCH/STRING` macros and the `comms::version` / `version_major` / `version_minor` / `version_patch` constants.   |
-| `commons/types.hpp`              | `i8`…`u64`, `f32`/`f64`, `usize`/`isize`, complex aliases (`cs8`…`cs64`, `cu8`…`cu64`, `cf32`/`cf64`), and `i128`/`u128` (gated by `COMMONS_HAS_INT128`).                                   |
-| `commons/fixed_string.hpp`       | `comms::FixedString<N>` — structural, NTTP-friendly fixed string.                                                                                                                           |
-| `commons/color.hpp`              | `comms::Color`, `comms::Hsl`/`comms::Hsv`, and `comms::Colors::css` / `comms::Colors::mui` palettes.                                                                                        |
-| `commons/icon.hpp`               | `comms::Icon` — an Iconify `set:name` identifier; `Icon::from` / `Icon::parse`.                                                                                                             |
-| `commons/icons.hpp`              | Opt-in predefined catalogs: `comms::Icons::mdi::...`. Not pulled by the umbrella.                                                                                                           |
-| `commons/literals.hpp`           | The `comms::literals` user-defined literals: `"#6366f1"_color` and `"mdi:home"_icon` (both `consteval`).                                                                                    |
-| `commons/display_info.hpp`       | `comms::DisplayInfo`, the `comms::HasDisplayInfo<T>` trait, free `comms::display_info<T>()`, and the `comms::Displayable<T>` concept.                                                       |
-| `commons/flag.hpp`               | `comms::Flag`/`FlagCategory`, `FlagRef`, `FlagSet`, `GlobalFlagRegistry`, the `IHasFlags`/`HasFlags`/`FlagBuilderMixin`/`FlagBuilderGetters` mixins, and the `COMMONS_*_FLAG*` macros.      |
-| `commons/origin.hpp`             | `comms::IOrigin`/`OriginPtr`, the `OriginKind<FixedString, Derived>` CRTP base, built-in `Core`/`Internal`/`External`/`Unknown` origins, `GlobalOriginRegistry`, `COMMONS_REGISTER_ORIGIN`. |
-| `commons/prioritized.hpp`        | `comms::Prioritized`, `get_priority`, the comparators, `PrioritizedSet<T>`, `PrioritizedBuilder<Derived>`, and `WithPriority<T>` / `with_priority` / `make_prioritized`.                    |
-| `commons/semver.hpp`             | `comms::SemVer` — a Semantic Versioning 2.0.0 value; non-throwing `SemVer::parse`, full §11 ordering, `std::hash`.                                                                          |
-| `commons/version_constraint.hpp` | `comms::VersionConstraint` — an npm-style semver range answering `satisfies(SemVer)`; `VersionConstraint::parse` throws on a malformed sub-version.                                         |
-| `commons/id.hpp`                 | `comms::Id<Tag, Repr>` — strong-typed identifier; `Uint{8,16,32,64}Id`/`StringId`/`UlidId` aliases, `to_string`/`display_string`, and the `COMMONS_DEFINE_*_ID` macros.                     |
+| Header                           | Provides                                                                                                                                                                                         |
+|----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `commons/commons.hpp`            | Umbrella header (all core types + JSON hooks).                                                                                                                                                   |
+| `commons/version.hpp`            | Generated from `version.hpp.in` by the build: `COMMONS_VERSION_MAJOR/MINOR/PATCH/STRING` macros and the `comms::version` / `version_major` / `version_minor` / `version_patch` constants.        |
+| `commons/types.hpp`              | `i8`…`u64`, `f32`/`f64`, `usize`/`isize`, complex aliases (`cs8`…`cs64`, `cu8`…`cu64`, `cf32`/`cf64`), and `i128`/`u128` (gated by `COMMONS_HAS_INT128`).                                        |
+| `commons/fixed_string.hpp`       | `comms::FixedString<N>` — structural, NTTP-friendly fixed string.                                                                                                                                |
+| `commons/color.hpp`              | `comms::Color`, `comms::Hsl`/`comms::Hsv`, and `comms::Colors::css` / `comms::Colors::mui` palettes.                                                                                             |
+| `commons/icon.hpp`               | `comms::Icon` — an Iconify `set:name` identifier; `Icon::from` / `Icon::parse`.                                                                                                                  |
+| `commons/icons.hpp`              | Opt-in predefined catalogs: `comms::Icons::mdi::...`. Not pulled by the umbrella.                                                                                                                |
+| `commons/literals.hpp`           | The `comms::literals` user-defined literals: `"#6366f1"_color` and `"mdi:home"_icon` (both `consteval`).                                                                                         |
+| `commons/display_info.hpp`       | `comms::DisplayInfo`, the `comms::HasDisplayInfo<T>` trait, free `comms::display_info<T>()`, and the `comms::Displayable<T>` concept.                                                            |
+| `commons/flag.hpp`               | `comms::Flag`/`FlagCategory`, `FlagRef`, `FlagSet`, `GlobalFlagRegistry`, the `IHasFlags`/`HasFlags`/`FlagBuilderMixin`/`FlagBuilderGetters` mixins, and the `COMMONS_*_FLAG*` macros.           |
+| `commons/origin.hpp`             | `comms::IOrigin`/`OriginPtr`, the `OriginKind<FixedString, Derived>` CRTP base, built-in `Core`/`Internal`/`External`/`Unknown` origins, `GlobalOriginRegistry`, `COMMONS_REGISTER_ORIGIN`.      |
+| `commons/prioritized.hpp`        | `comms::Prioritized`, `get_priority`, the comparators, `PrioritizedSet<T>`, `PrioritizedBuilder<Derived>`, and `WithPriority<T>` / `with_priority` / `make_prioritized`.                         |
+| `commons/semver.hpp`             | `comms::SemVer` — a Semantic Versioning 2.0.0 value; non-throwing `SemVer::parse`, full §11 ordering, `std::hash`.                                                                               |
+| `commons/version_constraint.hpp` | `comms::VersionConstraint` — an npm-style semver range answering `satisfies(SemVer)`; `VersionConstraint::parse` throws on a malformed sub-version.                                              |
+| `commons/id.hpp`                 | `comms::Id<Tag, Repr>` — strong-typed identifier; `Uint{8,16,32,64}Id`/`StringId`/`UlidId` aliases, `to_string`/`display_string`, and the `COMMONS_DEFINE_*_ID` macros.                          |
+| `commons/audit_record.hpp`       | `comms::AuditRecord`, `ChangeAuditRecord<T>`, the capped `AuditLog<Record>` (and the `AuditRecords` / `ChangeAuditRecords<T>` aliases); the `COMMONS_AUDIT_RECORDS_CAPACITY` capacity seam.      |
 | `commons/metadata.hpp`           | `comms::md::Value`/`Array`/`Object` (and the `comms::Metadata` root alias) — a dynamic value tree with path lookup, deep merge, hashing, and `operator<<`/`std::format`; `MetadataError` family. |
-| `commons/config.hpp`             | The `COMMONS_WITH_*` feature-gate macros.                                                                                                                                                   |
-| `commons/json.hpp`               | Optional nlohmann/json hooks (inert unless the dependency is present). A thin umbrella over per-type modules in `commons/json/<name>.hpp`.                                                  |
+| `commons/config.hpp`             | The `COMMONS_WITH_*` feature-gate macros.                                                                                                                                                        |
+| `commons/json.hpp`               | Optional nlohmann/json hooks (inert unless the dependency is present). A thin umbrella over per-type modules in `commons/json/<name>.hpp`.                                                       |
 
 ## Examples
 
 Each example is a self-contained program under `examples/`.
 
-| Example                             | Demonstrates                                                                                 |
-|-------------------------------------|----------------------------------------------------------------------------------------------|
-| `examples/hello.cpp`                | `FixedString`, the numeric aliases, and `version`.                                           |
-| `examples/color.cpp`                | Parsing, hex/CSS output, HSL transforms, palettes, WCAG, and the formatter specs.            |
-| `examples/icon.cpp`                 | Predefined icons, ad-hoc construction, the `set`/`name` accessors, and text output.          |
-| `examples/display_info.cpp`         | Intrusive and non-intrusive `DisplayInfo` attachment and the `Displayable` concept.          |
-| `examples/flag.cpp`                 | `FlagSet`, the global registry, and a category-constrained builder read through `IHasFlags`. |
-| `examples/origin.cpp`               | `IOrigin` kinds, `clone()`, the `DisplayInfo` description, and registry resolution by kind.  |
-| `examples/prioritized.cpp`          | The builder mixin, both `WithPriority` flavors, `PrioritizedSet`, and the comparators.       |
-| `examples/semver.cpp`               | Parsing, full-precedence sorting, `std::format`, and `VersionConstraint` range checks.       |
-| `examples/id.cpp`                   | The `Id<Tag, Repr>` macros, `display_string`, inherited formatter specs, and the ULID repr.  |
+| Example                             | Demonstrates                                                                                                                        |
+|-------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `examples/hello.cpp`                | `FixedString`, the numeric aliases, and `version`.                                                                                  |
+| `examples/color.cpp`                | Parsing, hex/CSS output, HSL transforms, palettes, WCAG, and the formatter specs.                                                   |
+| `examples/icon.cpp`                 | Predefined icons, ad-hoc construction, the `set`/`name` accessors, and text output.                                                 |
+| `examples/display_info.cpp`         | Intrusive and non-intrusive `DisplayInfo` attachment and the `Displayable` concept.                                                 |
+| `examples/flag.cpp`                 | `FlagSet`, the global registry, and a category-constrained builder read through `IHasFlags`.                                        |
+| `examples/origin.cpp`               | `IOrigin` kinds, `clone()`, the `DisplayInfo` description, and registry resolution by kind.                                         |
+| `examples/prioritized.cpp`          | The builder mixin, both `WithPriority` flavors, `PrioritizedSet`, and the comparators.                                              |
+| `examples/semver.cpp`               | Parsing, full-precedence sorting, `std::format`, and `VersionConstraint` range checks.                                              |
+| `examples/id.cpp`                   | The `Id<Tag, Repr>` macros, `display_string`, inherited formatter specs, and the ULID repr.                                         |
+| `examples/audit_record.cpp`         | `AuditRecord` fields and id helpers, `ChangeAuditRecord<T>` before/after, and the capped `AuditLog`.                                |
 | `examples/metadata/`                | The `comms::md` tree: `basic`, `object_helpers`, `nested`, `merge`, `path_lookup`, `format_output`, and `json_integration` (gated). |
-| `examples/json_integration.cpp`     | The optional nlohmann/json round-trips (requires the integration).                           |
-| `examples/consumers/fetch_content/` | A standalone downstream project that pulls `commons` via FetchContent.                       |
+| `examples/json_integration.cpp`     | The optional nlohmann/json round-trips (requires the integration).                                                                  |
+| `examples/consumers/fetch_content/` | A standalone downstream project that pulls `commons` via FetchContent.                                                              |
 
 ## Testing
 

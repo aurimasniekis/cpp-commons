@@ -171,6 +171,32 @@ carries no nlohmann; the `Value`/`Object`/`Array` JSON round-trip lives in
 `commons/json/metadata.hpp` (pulled by the `commons/json.hpp` umbrella) under
 `COMMONS_WITH_NLOHMANN_JSON`.
 
+The `comms::AuditRecord` family (`audit_record.hpp`) is a shared **audit trail**
+facility — *who* did *what*, *when*, *from where*. `comms::AuditRecord` is the
+base value type: a required `username`, a `timestamp` (a real `AuditClock`
+`time_point` defaulting to `now()`, mirroring `reason.hpp`'s `created_at`),
+optional `ip`/`user_agent`/`session_id`, a `related_ids` `map<string,string>`
+(name → id string), and a `comms::Metadata` bag (empty by default). Ids are
+stored as **strings** because `Id<Tag,Repr>` has no type-erased form — the
+templated `set_session_id(id)` / `add_related_id(name, id)` helpers capture
+`comms::to_string(id)` so a single record can reference ids of different kinds.
+It is `operator==`-only (no `<=>`: `Metadata` is equality-only).
+`comms::ChangeAuditRecord<T>` publicly inherits `AuditRecord` and adds
+`before`/`after` as `std::optional<T>` (absent on create/delete). `comms::AuditLog<Record>`
+is a capped, insertion-ordered collection (`push()` appends, drops the oldest
+front records FIFO once over capacity; capacity `0` keeps nothing), with the
+runtime cap defaulting to the `COMMONS_AUDIT_RECORDS_CAPACITY` value-override
+seam (default 3, see below); `AuditRecords` and `ChangeAuditRecords<T>` are the
+aliases. **All three types plus the `<chrono>` millisecond timestamp encoding
+live in the single `audit_record.hpp`, and all their JSON hooks in the single
+`commons/json/audit_record.hpp`** (free ADL `to_json`/`from_json`, the
+container/templated forms instantiated only for a serializable `Record`/`T`): an
+`AuditRecord` always emits `username`+`timestamp` (epoch millis) with optional
+fields omitted when absent/empty, a `ChangeAuditRecord<T>` adds `before`/`after`,
+and an `AuditLog` is a JSON array (capacity is **not** serialized — a log read
+under a smaller cap keeps the newest N). Pulling in `<commons/id.hpp>` for the
+helpers does not force ulid (still gated by `COMMONS_WITH_ULID`).
+
 ## Feature gates (live in `commons/config.hpp`)
 
 Each optional integration is a `COMMONS_WITH_*` macro resolving to `1`/`0`:
@@ -201,7 +227,10 @@ live in `prioritized.hpp` (not `config.hpp`, so the umbrella does not force
 build only emits a `-D` when a concrete override is supplied: CMake via a cache
 `STRING` (`-DCOMMONS_PRIORITIZED_DEFAULT_PRIORITY=5`), Meson via a string option
 (`-Dprioritized_default_priority=5`). Downstream consumers can predefine the macro
-directly.
+directly. The `COMMONS_AUDIT_RECORDS_CAPACITY` macro (in `audit_record.hpp`,
+overriding `comms::AuditLog`'s default capacity — default 3) is wired the same
+way (CMake `-DCOMMONS_AUDIT_RECORDS_CAPACITY=5`, Meson
+`-Daudit_records_capacity=5`), but its C++ default *is* a concrete literal.
 
 ## The rule for every public type
 
