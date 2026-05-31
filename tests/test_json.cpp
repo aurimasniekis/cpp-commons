@@ -537,6 +537,29 @@ TEST(Json, ReasonPtrRoundTripsFields) {
     EXPECT_EQ(back->created_at, truncated);
 }
 
+TEST(Json, ReasonMetadataOmittedWhenEmpty) {
+    // The default (empty) metadata keeps the reason's compact wire shape.
+    const auto r = comms::make_reason(1, "x");
+    const json j = r;
+    EXPECT_FALSE(j.contains("metadata"));
+}
+
+TEST(Json, ReasonMetadataRoundTrips) {
+    auto r = comms::make_reason(429, "slow down");
+    r->metadata["attempt"] = comms::md::Value{3};
+    r->metadata["endpoint"] = comms::md::Value{"/v1/items"};
+
+    const json j = r;
+    ASSERT_TRUE(j.contains("metadata"));
+    EXPECT_EQ(j.at("metadata").at("attempt").get<int>(), 3);
+    EXPECT_EQ(j.at("metadata").at("endpoint").get<std::string>(), "/v1/items");
+
+    const auto back = j.get<comms::ReasonPtr>();
+    ASSERT_NE(back, nullptr);
+    EXPECT_EQ(back->metadata.require("attempt").as_int(), 3);
+    EXPECT_EQ(back->metadata.require_string("endpoint"), "/v1/items");
+}
+
 TEST(Json, FailureReasonPtrRoundTrips) {
     const comms::FailureReasonPtr r =
         comms::make_failure_reason<comms::UnknownFailureReason>(7, "boom");

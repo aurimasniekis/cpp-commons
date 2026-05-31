@@ -112,6 +112,22 @@ TEST(Reason, CloneThroughBasePointer) {
     EXPECT_EQ(c->kind(), "unknown");
 }
 
+TEST(Reason, MetadataDefaultsEmpty) {
+    const GenericReason r;
+    EXPECT_TRUE(r.metadata.empty());
+}
+
+TEST(Reason, CloneDeepCopiesMetadata) {
+    GenericReason original{1, "first"};
+    original.metadata["k"] = comms::md::Value{42};
+    const ReasonPtr copy = original.clone();
+    ASSERT_NE(copy, nullptr);
+    EXPECT_EQ(copy->metadata.require("k").as_int(), 42);
+
+    original.metadata["k"] = comms::md::Value{99};        // mutate the original
+    EXPECT_EQ(copy->metadata.require("k").as_int(), 42);  // the clone is unaffected
+}
+
 // -- info() / Displayable ----------------------------------------------------
 
 static_assert(comms::Displayable<GenericReason>);

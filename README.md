@@ -21,6 +21,9 @@ cpp-ulid is on the include path. The namespace is `comms`; headers live under
   projects instead of re-implementing them per repository.
 - **Good for** UI-adjacent backend code: colors, icons, and display metadata
   that need to round-trip to JSON for a frontend.
+- **Good for** carrying schemaless, JSON-like data: `comms::md` (with the
+  `comms::Metadata` document-root alias) is a dynamic `Value`/`Object`/`Array`
+  tree with path lookup, deep merge, and JSON round-trip.
 - **Light by default.** The core depends only on the C++23 standard library.
   The JSON hooks stay completely inert unless nlohmann/json is on the include
   path, so you never pay for an integration you don't use.
@@ -302,6 +305,25 @@ prefixes it with `Tag::name` for named tags; and the `std::formatter<Id>`
 specialization inherits from `std::formatter<Repr>` so any spec the wrapped
 type accepts (e.g. `"{:#x}"` for the uint reprs) works transparently.
 
+### `comms::md` — dynamic value tree (`comms::Metadata`)
+
+A JSON-like dynamic value tree for schemaless data. `comms::md::Value` is a
+discriminated union of null / bool / `i64` / `u64` / `float` / `double` /
+`string` / `Array` / `Object`; `Array` is a `vector<Value>` and `Object` a
+string-keyed map with transparent `string_view` lookup. The common
+document-root case is surfaced at the Commons root as **`comms::Metadata`**
+(an alias for `comms::md::Object`); everything else stays under `comms::md::`.
+On top of the containers it ships dotted/bracketed **path lookup**
+(`find_path` / `require_path` / `contains_path`, e.g. `"a.b[0].c"`), **deep
+merge** (nested objects recurse, scalars overwrite, arrays replace),
+order-independent `std::hash` for `Object`, compact-JSON `operator<<` and
+`std::formatter` (hand-rolled, no nlohmann dependency), and free-function
+helpers (`contains` / `find_ptr` / `require*` / `get_*_if` / `merge`). Its
+exception trio roots at `comms::Exception`: `MetadataError` → `MissingKeyError`
+/ `TypeError`. The whole library is one self-contained header,
+`commons/metadata.hpp`; the `Value`/`Object`/`Array` ⇄ JSON round-trip lives in
+`commons/json.hpp` under `COMMONS_WITH_NLOHMANN_JSON`.
+
 ### `comms::Exception`
 
 The root of the Commons exception hierarchy — a thin `std::runtime_error`
@@ -313,7 +335,9 @@ it; the reason exceptions below are the first family.
 
 A polymorphic *"why" envelope* for an outcome that is **not** an exception — a
 rejected request, a cancelled job, a refused operation. It carries an `int code`,
-a `std::string message`, and a `created_at` timestamp, and — like `IOrigin` — it
+a `std::string message`, a `created_at` timestamp, and an optional `metadata`
+bag (a `comms::Metadata` / `comms::md::Object`, empty by default, for arbitrary
+structured context), and — like `IOrigin` — it
 is an **open set**: each kind has a compile-time `kind()` discriminator via the
 `ReasonKind<"kind", Derived>` CRTP base, which wires `clone()` and an *optional*
 `DisplayInfo`-backed `info()`. `comms::IFailureReason` refines it for a
@@ -338,7 +362,8 @@ and the generic/unknown built-ins override it to carry their code
 `throw_as_exception()`), with `RejectException` / `CancelException` as siblings.
 
 JSON (when `COMMONS_WITH_NLOHMANN_JSON` is on) round-trips a reason as
-`{"kind","code","message","created_at"}`, resolving `kind` through the registry,
+`{"kind","code","message","created_at"}` (plus a `"metadata"` object when that
+bag is non-empty, omitted when empty), resolving `kind` through the registry,
 so a `ReasonPtr` deserializes back to the right concrete kind. A **sub-reason
 with extra fields** extends the JSON by overriding the gated virtual
 `IReason::write_json` / `read_json` hooks (calling the base first) — its fields
@@ -652,6 +677,37 @@ int main() {
 }
 ```
 
+### Carrying dynamic metadata
+
+```cpp
+#include <commons/metadata.hpp>
+
+#include <format>
+#include <iostream>
+
+int main() {
+    namespace md = comms::md;
+
+    // comms::Metadata is the root-level alias for comms::md::Object.
+    comms::Metadata m;
+    m["name"] = "sensor-7";
+    m["enabled"] = true;
+    m["tags"] = {"alpha", "beta"};                 // braced list → Array
+    m["calib"] = {{"gain", 1.5}, {"offset", -2}};  // braced pairs → nested Object
+
+    std::cout << std::format("{}\n", m);           // compact JSON
+
+    // Typed read-back and dotted/bracketed path lookup.
+    std::cout << "name      : " << m.require_string("name") << "\n";
+    std::cout << "calib.gain: " << m.require_path("calib.gain").as_double() << "\n";
+    std::cout << "tags[1]   : " << m.require_path("tags[1]").as_string() << "\n";
+
+    // Deep merge: nested objects recurse, scalars overwrite, arrays replace.
+    m.merge(md::Object{{"calib", md::Object{{"offset", -1}}}});
+    std::cout << "merged    : " << m << "\n";
+}
+```
+
 ### Explaining outcomes with reasons
 
 ```cpp
@@ -668,8 +724,12 @@ int main() {
     namespace c = comms;
 
     // A reason answers "why?" for a non-exceptional outcome.
-    const c::GenericReason rejected{403, "not allowed"};
+    c::GenericReason rejected{403, "not allowed"};
     std::cout << c::to_string(rejected) << "\n";   // GenericReason(403): not allowed
+
+    // Every reason carries an optional metadata bag for structured context.
+    rejected.metadata["user_id"] = 42;
+    rejected.metadata["scope"] = "admin";
 
     // A custom kind titles itself by its type name (no code).
     std::cout << c::to_string(RateLimitReason{}) << "\n";   // RateLimitReason:
@@ -837,8 +897,9 @@ synchronized; treat concurrent mutation as unsafe.
 | `commons/semver.hpp`             | `comms::SemVer` — a Semantic Versioning 2.0.0 value; non-throwing `SemVer::parse`, full §11 ordering, `std::hash`.                                                                          |
 | `commons/version_constraint.hpp` | `comms::VersionConstraint` — an npm-style semver range answering `satisfies(SemVer)`; `VersionConstraint::parse` throws on a malformed sub-version.                                         |
 | `commons/id.hpp`                 | `comms::Id<Tag, Repr>` — strong-typed identifier; `Uint{8,16,32,64}Id`/`StringId`/`UlidId` aliases, `to_string`/`display_string`, and the `COMMONS_DEFINE_*_ID` macros.                     |
+| `commons/metadata.hpp`           | `comms::md::Value`/`Array`/`Object` (and the `comms::Metadata` root alias) — a dynamic value tree with path lookup, deep merge, hashing, and `operator<<`/`std::format`; `MetadataError` family. |
 | `commons/config.hpp`             | The `COMMONS_WITH_*` feature-gate macros.                                                                                                                                                   |
-| `commons/json.hpp`               | Optional nlohmann/json hooks (inert unless the dependency is present).                                                                                                                      |
+| `commons/json.hpp`               | Optional nlohmann/json hooks (inert unless the dependency is present). A thin umbrella over per-type modules in `commons/json/<name>.hpp`.                                                  |
 
 ## Examples
 
@@ -855,6 +916,7 @@ Each example is a self-contained program under `examples/`.
 | `examples/prioritized.cpp`          | The builder mixin, both `WithPriority` flavors, `PrioritizedSet`, and the comparators.       |
 | `examples/semver.cpp`               | Parsing, full-precedence sorting, `std::format`, and `VersionConstraint` range checks.       |
 | `examples/id.cpp`                   | The `Id<Tag, Repr>` macros, `display_string`, inherited formatter specs, and the ULID repr.  |
+| `examples/metadata/`                | The `comms::md` tree: `basic`, `object_helpers`, `nested`, `merge`, `path_lookup`, `format_output`, and `json_integration` (gated). |
 | `examples/json_integration.cpp`     | The optional nlohmann/json round-trips (requires the integration).                           |
 | `examples/consumers/fetch_content/` | A standalone downstream project that pulls `commons` via FetchContent.                       |
 

@@ -109,7 +109,9 @@ throws them.
 
 `comms::IReason` (`reason.hpp`) is a polymorphic **"why" envelope** for an
 outcome that is *not* an exception (a reject, a cancel, a refusal): it carries a
-numeric `code`, a `message`, and a `created_at` timestamp, and — exactly like
+numeric `code`, a `message`, a `created_at` timestamp, and an optional
+`metadata` bag (a `comms::Metadata` / `comms::md::Object`, empty by default, for
+arbitrary structured context), and — exactly like
 `IOrigin` — is an **open set** keyed by a `kind()` discriminator supplied via the
 `ReasonKind<"kind", Derived>` CRTP base (which wires `clone()` and an *optional*
 `DisplayInfo`-backed `info()` — a kind with no `display_info()` gets an empty
@@ -135,7 +137,8 @@ program-wide `GlobalReasonRegistry` via `COMMONS_REGISTER_REASON(Type)` (mirrori
 `ReasonException` (carries any `IReason`) → `FailureReasonException` (carries an
 `IFailureReason`, thrown by `throw_as_exception()`), with `RejectException` /
 `CancelException` as sibling `ReasonException`s. A reason round-trips as
-`{"kind","code","message","created_at"}` (timestamp as epoch milliseconds).
+`{"kind","code","message","created_at"}` (timestamp as epoch milliseconds), plus
+a `"metadata"` object when that bag is non-empty (omitted when empty).
 **Reason is the one exception to the "JSON lives only in `json.hpp`" rule:** the
 per-field (de)serializers are the **virtual** `IReason::write_json` / `read_json`
 hooks *in `reason.hpp`*, gated by `COMMONS_WITH_NLOHMANN_JSON` (so nlohmann is

@@ -45,7 +45,8 @@
 ///     `from_json` resolves `kind` against the `GlobalOriginRegistry`.
 ///   - `ReasonPtr` / `FailureReasonPtr` ⇄ JSON **object**
 ///     `{"kind","code","message","created_at"}` (the timestamp as epoch
-///     milliseconds); `from_json` resolves `kind` against the
+///     milliseconds, plus a `"metadata"` object when that bag is non-empty);
+///     `from_json` resolves `kind` against the
 ///     `GlobalReasonRegistry`, and the failure variant additionally requires the
 ///     resolved kind to be an `IFailureReason`. An unknown kind throws. The
 ///     per-field work is the virtual `IReason::write_json`/`read_json` hooks in

@@ -45,9 +45,15 @@
 /// `throw_as_exception()` throws; `RejectException` / `CancelException` are
 /// `ReasonException`s for the two most common reject/cancel sites.
 ///
+/// Every reason also carries an optional `metadata` bag — a `comms::Metadata`
+/// (`comms::md::Object`), empty by default — for arbitrary structured context
+/// (attempt counts, offending values, …). It is a public member, set directly
+/// like `code`/`message`.
+///
 /// Serialization (gated by `COMMONS_WITH_NLOHMANN_JSON`): a reason travels as
 /// `{"kind", "code", "message", "created_at"}` (the timestamp as epoch
-/// milliseconds). Uniquely among the Commons types, the per-field (de)serializers
+/// milliseconds), plus a `"metadata"` object when that bag is non-empty (omitted
+/// when empty). Uniquely among the Commons types, the per-field (de)serializers
 /// are the **virtual** `IReason::write_json` / `read_json` hooks *in this header*
 /// (gated, so nlohmann is still only pulled when present) — a sub-reason adds its
 /// own fields by overriding them (calling the base first), and they round-trip
@@ -68,6 +74,7 @@
 #include <commons/display_info.hpp>
 #include <commons/exception.hpp>
 #include <commons/fixed_string.hpp>
+#include <commons/metadata.hpp>
 
 #include <chrono>
 #include <compare>
@@ -90,6 +97,8 @@
 #endif
 
 #if COMMONS_WITH_NLOHMANN_JSON
+#include <commons/json/metadata.hpp>  // comms::md::Object ⇄ json, for the metadata field
+
 #include <nlohmann/json.hpp>
 
 #include <cstdint>  // std::int64_t, used only by the gated read_json below
@@ -143,8 +152,8 @@ namespace detail {
 }  // namespace detail
 
 /// Abstract "why" envelope. Hold one through `ReasonPtr`; read its `code`,
-/// `message`, and `created_at`, query its `kind()` discriminator, copy it with
-/// `clone()`, and read its description via `info()`.
+/// `message`, `created_at`, and optional `metadata`, query its `kind()`
+/// discriminator, copy it with `clone()`, and read its description via `info()`.
 class IReason {
 public:
     // Public data members (rather than getters) match the codebase convention
@@ -153,6 +162,7 @@ public:
     int code = 0;         ///< Numeric reason code (`0` = unspecified).
     std::string message;  ///< Human-readable explanation of the "why".
     ReasonClock::time_point created_at = ReasonClock::now();  ///< When it was raised.
+    Metadata metadata;  ///< Optional structured context (a `comms::md::Object`); empty by default.
 
     virtual ~IReason() = default;
 
@@ -177,11 +187,12 @@ public:
 
 #if COMMONS_WITH_NLOHMANN_JSON
     /// Write this reason's fields into the JSON object `j`. The base writes
-    /// `kind`/`code`/`message`/`created_at` (timestamp as epoch milliseconds); a
-    /// sub-reason overrides this to add its own fields — call
-    /// `IReason::write_json(j)` first. Drives `to_json` through `ReasonPtr`.
-    /// Gated on `COMMONS_WITH_NLOHMANN_JSON` (see the vtable caveat in the file
-    /// header).
+    /// `kind`/`code`/`message`/`created_at` (timestamp as epoch milliseconds),
+    /// plus a `metadata` object when it is non-empty (omitted when empty, so the
+    /// common case keeps its compact shape); a sub-reason overrides this to add
+    /// its own fields — call `IReason::write_json(j)` first. Drives `to_json`
+    /// through `ReasonPtr`. Gated on `COMMONS_WITH_NLOHMANN_JSON` (see the vtable
+    /// caveat in the file header).
     virtual void write_json(nlohmann::json& j) const {
         j["kind"] = std::string{kind()};
         j["code"] = code;
@@ -189,12 +200,15 @@ public:
         j["created_at"] =
             std::chrono::duration_cast<std::chrono::milliseconds>(created_at.time_since_epoch())
                 .count();
+        if (!metadata.empty()) {
+            j["metadata"] = metadata;  // comms::md::Object ⇄ json via ADL
+        }
     }
 
     /// Read this reason's fields from the JSON object `j`. The base reads
-    /// `code`/`message`/`created_at` (absent keys keep their defaults; `kind` is
-    /// fixed by the concrete type). Override to read your own fields — call
-    /// `IReason::read_json(j)` first. Drives `from_json` through `ReasonPtr`.
+    /// `code`/`message`/`created_at`/`metadata` (absent keys keep their defaults;
+    /// `kind` is fixed by the concrete type). Override to read your own fields —
+    /// call `IReason::read_json(j)` first. Drives `from_json` through `ReasonPtr`.
     virtual void read_json(const nlohmann::json& j) {
         if (const auto it = j.find("code"); it != j.end() && !it->is_null()) {
             it->get_to(code);
@@ -205,6 +219,9 @@ public:
         if (const auto it = j.find("created_at"); it != j.end() && !it->is_null()) {
             created_at = ReasonClock::time_point{
                 std::chrono::milliseconds{it->template get<std::int64_t>()}};
+        }
+        if (const auto it = j.find("metadata"); it != j.end() && !it->is_null()) {
+            it->get_to(metadata);  // comms::md::Object ⇄ json via ADL
         }
     }
 #endif
