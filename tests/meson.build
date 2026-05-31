@@ -16,10 +16,20 @@ commons_test_sources = [
     'test_prioritized.cpp',
     'test_semver.cpp',
     'test_version_constraint.cpp',
+    'test_metadata_value.cpp',
+    'test_metadata_object.cpp',
+    'test_metadata_helpers.cpp',
+    'test_metadata_path.cpp',
+    'test_metadata_merge.cpp',
+    'test_metadata_compare.cpp',
+    'test_metadata_hash.cpp',
+    'test_metadata_ostream.cpp',
+    'test_metadata_format.cpp',
 ]
 
 if commons_with_json
     commons_test_sources += 'test_json.cpp'
+    commons_test_sources += 'test_metadata_json.cpp'
 endif
 
 commons_tests = executable('commons_tests',

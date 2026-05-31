@@ -15,10 +15,19 @@ set(_commons_test_sources
     test_prioritized.cpp
     test_semver.cpp
     test_version_constraint.cpp
+    test_metadata_value.cpp
+    test_metadata_object.cpp
+    test_metadata_helpers.cpp
+    test_metadata_path.cpp
+    test_metadata_merge.cpp
+    test_metadata_compare.cpp
+    test_metadata_hash.cpp
+    test_metadata_ostream.cpp
+    test_metadata_format.cpp
 )
 
 if(COMMONS_WITH_NLOHMANN_JSON AND TARGET nlohmann_json::nlohmann_json)
-    list(APPEND _commons_test_sources test_json.cpp)
+    list(APPEND _commons_test_sources test_json.cpp test_metadata_json.cpp)
 endif()
 
 add_executable(commons_tests ${_commons_test_sources})

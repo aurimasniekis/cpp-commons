@@ -147,6 +147,27 @@ drive those hooks. Because the gate adds virtual members it changes `IReason`'s
 vtable, so **every TU in a build must resolve `COMMONS_WITH_NLOHMANN_JSON`
 identically** (force it with a `-D` if the build is mixed).
 
+The `comms::md` namespace (`metadata.hpp`) is a JSON-like **dynamic value tree**.
+`comms::md::Value` is a discriminated union of null/bool/`i64`/`u64`/`float`/
+`double`/`string`/`Array`/`Object` (the `Object` alternative held through a
+`unique_ptr` so `Value` can recurse); `Array` is `vector<Value>` and `Object` a
+transparent-lookup `unordered_map<string, Value>` with JSON-flavored helpers.
+The whole library lives in **one self-contained header** (`Value`'s
+variant-touching members are declared in-class and defined out-of-line after
+`Object` is complete — preserve that ordering). It ships dotted/bracketed path
+lookup (`find_path`/`require_path`/`contains_path`, e.g. `"a.b[0].c"`), deep
+`merge` (objects recurse, scalars overwrite, arrays replace), order-independent
+`std::hash` for `Object`, compact-JSON `operator<<` and `std::formatter` (both
+hand-rolled via `to_chars`, no nlohmann), and free-function helpers
+(`contains`/`find_ptr`/`require*`/`get_*_if`/`merge`). The headline document-root
+case is surfaced at the Commons **root** as `comms::Metadata`
+(`using Metadata = md::Object;`); everything else stays under `comms::md::…`. Its
+exception trio roots at `comms::Exception`: `MetadataError` →
+`MissingKeyError` / `TypeError`. Per the no-forced-dependency rule the header
+carries no nlohmann; the `Value`/`Object`/`Array` JSON round-trip lives in
+`commons/json/metadata.hpp` (pulled by the `commons/json.hpp` umbrella) under
+`COMMONS_WITH_NLOHMANN_JSON`.
+
 ## Feature gates (live in `commons/config.hpp`)
 
 Each optional integration is a `COMMONS_WITH_*` macro resolving to `1`/`0`:
@@ -184,16 +205,22 @@ directly.
 **Every public Commons type must ship its serialization hooks under the gates.**
 When adding a type, also add, guarded by the matching macro:
 
-- **nlohmann `to_json` / `from_json`** under `COMMONS_WITH_NLOHMANN_JSON`, in
-  `commons/json.hpp`. Class types: free ADL functions in namespace `comms`.
-  Fundamental types (e.g. the 128-bit aliases): an
-  `nlohmann::adl_serializer<T>` specialization — ADL cannot find free functions
-  for builtins. *Sole exception:* `reason.hpp` keeps its per-field
-  (de)serialization in **gated virtual hooks on `IReason`** (so a polymorphic,
-  open-set type's subkinds can extend the JSON by overriding); `json.hpp` then
-  only holds the `adl_serializer<ReasonPtr>` glue. Do this only for a
-  polymorphic open set that genuinely needs subclass-extensible JSON, and
-  document the vtable/uniform-gate caveat.
+- **nlohmann `to_json` / `from_json`** under `COMMONS_WITH_NLOHMANN_JSON`.
+  `commons/json.hpp` is a thin **umbrella** over per-type modules in
+  `commons/json/<name>.hpp`: a new type adds its hooks in its own
+  `commons/json/<name>.hpp` (each `#pragma once`, self-gating behind
+  `COMMONS_WITH_NLOHMANN_JSON`, including `<nlohmann/json.hpp>` + the commons
+  type header it serializes + any dependency sub-headers so it compiles
+  standalone) and is then `#include`d from the umbrella. Class types: free ADL
+  functions in namespace `comms`. Fundamental/`std` types (e.g. the 128-bit
+  aliases, `std::complex`, `std::optional`): an `nlohmann::adl_serializer<T>`
+  specialization — ADL cannot find free functions for builtins. *Sole
+  exception:* `reason.hpp` keeps its per-field (de)serialization in **gated
+  virtual hooks on `IReason`** (so a polymorphic, open-set type's subkinds can
+  extend the JSON by overriding); `commons/json/reason.hpp` then only holds the
+  `adl_serializer<ReasonPtr>` glue. Do this only for a polymorphic open set that
+  genuinely needs subclass-extensible JSON, and document the vtable/uniform-gate
+  caveat.
 
 Then: register the type's tests in `tests/CMakeLists.txt` + `tests/meson.build`
 (append the integration test under the `COMMONS_WITH_*` / `commons_with_*`
