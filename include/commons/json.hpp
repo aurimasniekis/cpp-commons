@@ -13,9 +13,10 @@
 /// sub-headers, so it compiles standalone) and is then `#include`d here.
 ///
 /// What it adds:
-///   - `AuditRecord` ⇄ JSON **object**: always `username` + `timestamp` (epoch
-///     milliseconds); `ip`/`user_agent`/`session_id` only when present, and
-///     `related_ids` (a `{name:id}` object) / `metadata` only when non-empty.
+///   - `AuditRecord` ⇄ JSON **object**: always `identity` (a `{"kind", ...}`
+///     object, defaulting to `NoIdentity`) + `timestamp` (epoch milliseconds);
+///     `ip`/`user_agent`/`session_id` only when present, and `related_ids`
+///     (a `{name:id}` object) / `metadata` only when non-empty.
 ///   - `ChangeAuditRecord<T>` ⇄ the base fields plus `before` / `after` (only
 ///     when present), when `T` is itself json-serializable.
 ///   - `AuditLog<Record>` (the `AuditRecords` / `ChangeAuditRecords<T>` aliases)
@@ -60,6 +61,16 @@
 ///     per-field work is the virtual `IReason::write_json`/`read_json` hooks in
 ///     `commons/reason.hpp` (gated there too), so a sub-reason's extra fields
 ///     round-trip by overriding them — that module only wires up the pointers.
+///   - `AbilityPtr` ⇄ JSON **object** `{"kind","value", ...fields}`; `from_json`
+///     resolves `kind` against the `GlobalAbilityRegistry` (unknown kind
+///     throws). The per-field work is the virtual `IAbility::write_json` /
+///     `read_json` hooks in `commons/ability.hpp` (gated there too), so a
+///     sub-ability's extra fields round-trip by overriding them.
+///   - `IdentityPtr` ⇄ JSON **object** `{"kind","value", ...fields}` (with an
+///     `abilities` array of `AbilityPtr` when non-empty); `from_json` resolves
+///     `kind` against the `GlobalIdentityRegistry` (unknown kind throws), via
+///     the virtual `IIdentity::write_json` / `read_json` hooks in
+///     `commons/identity.hpp`.
 ///   - `comms::md::Value` / `Object` / `Array` ⇄ their natural JSON shapes
 ///     (null/bool/number/string/array/object), recursively.
 ///
@@ -67,6 +78,7 @@
 /// `isize`) need nothing here: nlohmann already serializes the underlying
 /// arithmetic types natively.
 
+#include <commons/json/ability.hpp>
 #include <commons/json/audit_record.hpp>
 #include <commons/json/color.hpp>
 #include <commons/json/display_info.hpp>
@@ -74,6 +86,7 @@
 #include <commons/json/flag.hpp>
 #include <commons/json/icon.hpp>
 #include <commons/json/id.hpp>
+#include <commons/json/identity.hpp>
 #include <commons/json/metadata.hpp>
 #include <commons/json/optional.hpp>
 #include <commons/json/origin.hpp>

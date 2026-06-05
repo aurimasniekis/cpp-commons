@@ -1,4 +1,5 @@
 #include <commons/audit_record.hpp>
+#include <commons/identity.hpp>
 
 #include <gtest/gtest.h>
 
@@ -7,10 +8,15 @@
 
 namespace {
 
-comms::AuditRecord make_record(std::string username) {
+comms::AuditRecord make_record(const std::string& username) {
     comms::AuditRecord r;
-    r.username = std::move(username);
+    r.set_identity(comms::make_identity<comms::UserIdentity>(username));
     return r;
+}
+
+// The actor's name (the identity value) for a record.
+const std::string& actor(const comms::AuditRecord& r) {
+    return r.identity->value;
 }
 
 TEST(AuditRecords, DefaultCapacityMatchesMacro) {
@@ -27,10 +33,10 @@ TEST(AuditRecords, PushDropsOldestBeyondCapacity) {
 
     ASSERT_EQ(log.size(), 2U);
     // Oldest ("a") dropped; newest two kept in FIFO order.
-    EXPECT_EQ(log.front().username, "b");
-    EXPECT_EQ(log.back().username, "c");
-    EXPECT_EQ(log[0].username, "b");
-    EXPECT_EQ(log.at(1).username, "c");
+    EXPECT_EQ(actor(log.front()), "b");
+    EXPECT_EQ(actor(log.back()), "c");
+    EXPECT_EQ(actor(log[0]), "b");
+    EXPECT_EQ(actor(log.at(1)), "c");
 }
 
 TEST(AuditRecords, SetCapacityShrinksDroppingOldest) {
@@ -43,7 +49,7 @@ TEST(AuditRecords, SetCapacityShrinksDroppingOldest) {
     log.set_capacity(1);
     EXPECT_EQ(log.capacity(), 1U);
     ASSERT_EQ(log.size(), 1U);
-    EXPECT_EQ(log.front().username, "c");
+    EXPECT_EQ(actor(log.front()), "c");
 }
 
 TEST(AuditRecords, ZeroCapacityRetainsNothing) {
@@ -56,13 +62,13 @@ TEST(AuditRecords, ChangeAuditRecordsAliasBehavesTheSame) {
     comms::ChangeAuditRecords<int> log{2};
 
     comms::ChangeAuditRecord<int> r1;
-    r1.username = "a";
+    r1.set_identity(comms::make_identity<comms::UserIdentity>("a"));
     r1.after = 1;
     comms::ChangeAuditRecord<int> r2;
-    r2.username = "b";
+    r2.set_identity(comms::make_identity<comms::UserIdentity>("b"));
     r2.after = 2;
     comms::ChangeAuditRecord<int> r3;
-    r3.username = "c";
+    r3.set_identity(comms::make_identity<comms::UserIdentity>("c"));
     r3.after = 3;
 
     log.push(r1);
@@ -70,8 +76,8 @@ TEST(AuditRecords, ChangeAuditRecordsAliasBehavesTheSame) {
     log.push(r3);
 
     ASSERT_EQ(log.size(), 2U);
-    EXPECT_EQ(log.front().username, "b");
-    EXPECT_EQ(log.back().username, "c");
+    EXPECT_EQ(actor(log.front()), "b");
+    EXPECT_EQ(actor(log.back()), "c");
     ASSERT_TRUE(log.back().after.has_value());
     EXPECT_EQ(*log.back().after, 3);
 }

@@ -596,6 +596,108 @@ TEST(Json, ReasonPtrMissingKindThrows) {
     EXPECT_THROW((void)j.get<comms::ReasonPtr>(), nlohmann::json::other_error);
 }
 
+// -- Ability / AbilityPtr ----------------------------------------------------
+// An ability travels as {"kind","value", ...fields}; AbilityPtr null ⇄ JSON
+// null; an unknown kind throws.
+
+TEST(Json, AbilityRoleRoundTrip) {
+    const comms::AbilityPtr a = comms::make_ability<comms::RoleAbility>("admin");
+    const json j = a;
+    EXPECT_EQ(j.at("kind").get<std::string>(), "role");
+    EXPECT_EQ(j.at("value").get<std::string>(), "admin");
+
+    const auto back = j.get<comms::AbilityPtr>();
+    ASSERT_NE(back, nullptr);
+    EXPECT_TRUE(comms::ability_equal(a, back));
+}
+
+TEST(Json, AbilityGenericAndUnknownRoundTrip) {
+    for (const auto& a : {comms::make_ability<comms::GenericAbility>("x"),
+                          comms::make_ability<comms::UnknownAbility>("y")}) {
+        const json j = a;
+        const auto back = j.get<comms::AbilityPtr>();
+        ASSERT_NE(back, nullptr);
+        EXPECT_TRUE(comms::ability_equal(a, back));
+    }
+}
+
+TEST(Json, AbilityRecordPermissionExtraFieldsRoundTrip) {
+    auto a = comms::make_ability<comms::RecordPermissionAbility>("read", "order");
+    static_cast<comms::RecordPermissionAbility&>(*a).id = "perm-1";
+
+    const json j = a;
+    EXPECT_EQ(j.at("kind").get<std::string>(), "record_permission");
+    EXPECT_EQ(j.at("action").get<std::string>(), "read");
+    EXPECT_EQ(j.at("resource").get<std::string>(), "order");
+    EXPECT_EQ(j.at("id").get<std::string>(), "perm-1");
+
+    const auto back = j.get<comms::AbilityPtr>();
+    ASSERT_NE(back, nullptr);
+    auto* typed = dynamic_cast<comms::RecordPermissionAbility*>(back.get());
+    ASSERT_NE(typed, nullptr);
+    EXPECT_EQ(typed->action, "read");
+    EXPECT_EQ(typed->resource, "order");
+    EXPECT_TRUE(comms::ability_equal(a, back));
+}
+
+TEST(Json, AbilityPtrNullIsJsonNull) {
+    constexpr comms::AbilityPtr a;  // null
+    const json j = a;
+    EXPECT_TRUE(j.is_null());
+    EXPECT_EQ(j.get<comms::AbilityPtr>(), nullptr);
+}
+
+TEST(Json, AbilityPtrUnknownKindThrows) {
+    const json j = {{"kind", "no_such_ability"}, {"value", "x"}};
+    EXPECT_THROW((void)j.get<comms::AbilityPtr>(), nlohmann::json::other_error);
+}
+
+// -- Identity / IdentityPtr --------------------------------------------------
+
+TEST(Json, IdentityUserRoundTrip) {
+    const comms::IdentityPtr i = comms::make_identity<comms::UserIdentity>("alice");
+    const json j = i;
+    EXPECT_EQ(j.at("kind").get<std::string>(), "user");
+    EXPECT_EQ(j.at("value").get<std::string>(), "alice");
+
+    const auto back = j.get<comms::IdentityPtr>();
+    ASSERT_NE(back, nullptr);
+    EXPECT_TRUE(comms::identity_equal(i, back));
+}
+
+TEST(Json, IdentityWithAbilitiesRoundTrip) {
+    auto i = comms::make_identity<comms::UserIdentity>("bob");
+    i->add_ability(comms::make_ability<comms::RoleAbility>("editor"));
+    i->add_ability(comms::make_ability<comms::RecordPermissionAbility>("write", "doc"));
+
+    const json j = i;
+    ASSERT_TRUE(j.contains("abilities"));
+    ASSERT_TRUE(j.at("abilities").is_array());
+    EXPECT_EQ(j.at("abilities").size(), 2U);
+
+    const auto back = j.get<comms::IdentityPtr>();
+    ASSERT_NE(back, nullptr);
+    EXPECT_TRUE(comms::identity_equal(i, back));
+    EXPECT_EQ(back->abilities.size(), 2U);
+}
+
+TEST(Json, IdentityRootAndNoneRoundTrip) {
+    for (const auto& kind : {std::string{"root"}, std::string{"none"}}) {
+        comms::IdentityPtr i = kind == "root" ? comms::make_identity<comms::RootIdentity>()
+                                              : comms::make_identity<comms::NoIdentity>();
+        const json j = i;
+        EXPECT_EQ(j.at("kind").get<std::string>(), kind);
+        const auto back = j.get<comms::IdentityPtr>();
+        ASSERT_NE(back, nullptr);
+        EXPECT_EQ(back->kind(), kind);
+    }
+}
+
+TEST(Json, IdentityPtrUnknownKindThrows) {
+    const json j = {{"kind", "no_such_identity"}, {"value", "x"}};
+    EXPECT_THROW((void)j.get<comms::IdentityPtr>(), nlohmann::json::other_error);
+}
+
 // -- AuditRecord ------------------------------------------------------------
 
 COMMONS_DEFINE_UINT64_ID(JsonAuditOrderId, "audit.order");
@@ -608,7 +710,7 @@ comms::AuditClock::time_point audit_ts() {
 
 TEST(Json, AuditRecordFullRoundTrip) {
     comms::AuditRecord r;
-    r.username = "alice";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("alice"));
     r.timestamp = audit_ts();
     r.ip = "192.0.2.1";
     r.user_agent = "curl/8.0";
@@ -617,7 +719,8 @@ TEST(Json, AuditRecordFullRoundTrip) {
     r.metadata["attempt"] = comms::md::Value{3};
 
     const json j = r;
-    EXPECT_EQ(j.at("username").get<std::string>(), "alice");
+    EXPECT_EQ(j.at("identity").at("kind").get<std::string>(), "user");
+    EXPECT_EQ(j.at("identity").at("value").get<std::string>(), "alice");
     EXPECT_EQ(j.at("session_id").get<std::string>(), "42");
 
     const auto back = j.get<comms::AuditRecord>();
@@ -626,11 +729,11 @@ TEST(Json, AuditRecordFullRoundTrip) {
 
 TEST(Json, AuditRecordOmitsAbsentFields) {
     comms::AuditRecord r;
-    r.username = "bob";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("bob"));
     r.timestamp = audit_ts();
 
     const json j = r;
-    EXPECT_TRUE(j.contains("username"));
+    EXPECT_TRUE(j.contains("identity"));
     EXPECT_TRUE(j.contains("timestamp"));
     EXPECT_FALSE(j.contains("ip"));
     EXPECT_FALSE(j.contains("user_agent"));
@@ -644,7 +747,7 @@ TEST(Json, AuditRecordOmitsAbsentFields) {
 
 TEST(Json, AuditRecordTimestampMillis) {
     comms::AuditRecord r;
-    r.username = "carol";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("carol"));
     r.timestamp = audit_ts();
 
     const json j = r;
@@ -653,7 +756,7 @@ TEST(Json, AuditRecordTimestampMillis) {
 
 TEST(Json, AuditRecordRelatedIdsRoundTrip) {
     comms::AuditRecord r;
-    r.username = "dave";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("dave"));
     r.timestamp = audit_ts();
     r.add_related_id("order", JsonAuditOrderId{7U});
     r.add_related_id("tenant", JsonAuditTenantId{"acme"});
@@ -669,7 +772,7 @@ TEST(Json, AuditRecordRelatedIdsRoundTrip) {
 
 TEST(Json, AuditRecordMetadataRoundTrip) {
     comms::AuditRecord r;
-    r.username = "erin";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("erin"));
     r.timestamp = audit_ts();
     r.metadata["endpoint"] = comms::md::Value{"/v1/items"};
     r.metadata["attempt"] = comms::md::Value{3};
@@ -682,23 +785,34 @@ TEST(Json, AuditRecordMetadataRoundTrip) {
 }
 
 TEST(Json, AuditRecordNullFieldBecomesNullopt) {
-    const auto j = json{{"username", "frank"}, {"timestamp", 1'700'000'000'123}, {"ip", nullptr}};
+    const auto j = json{{"identity", {{"kind", "user"}, {"value", "frank"}}},
+                        {"timestamp", 1'700'000'000'123},
+                        {"ip", nullptr}};
     const auto r = j.get<comms::AuditRecord>();
-    EXPECT_EQ(r.username, "frank");
+    ASSERT_NE(r.identity, nullptr);
+    EXPECT_EQ(r.identity->value, "frank");
     EXPECT_FALSE(r.ip.has_value());
+}
+
+TEST(Json, AuditRecordMissingIdentityKeepsNoIdentity) {
+    const auto j = json{{"timestamp", 1'700'000'000'123}};
+    const auto r = j.get<comms::AuditRecord>();
+    ASSERT_NE(r.identity, nullptr);
+    EXPECT_EQ(r.identity->kind(), "none");
 }
 
 // -- ChangeAuditRecord ------------------------------------------------------
 
 TEST(Json, ChangeAuditRecordRoundTripBothPresent) {
     comms::ChangeAuditRecord<int> r;
-    r.username = "alice";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("alice"));
     r.timestamp = audit_ts();
     r.before = 10;
     r.after = 20;
 
     const json j = r;
-    EXPECT_EQ(j.at("username").get<std::string>(), "alice");  // base field co-serializes
+    EXPECT_EQ(j.at("identity").at("value").get<std::string>(),
+              "alice");  // base field co-serializes
     EXPECT_EQ(j.at("before").get<int>(), 10);
     EXPECT_EQ(j.at("after").get<int>(), 20);
 
@@ -708,7 +822,7 @@ TEST(Json, ChangeAuditRecordRoundTripBothPresent) {
 
 TEST(Json, ChangeAuditRecordOmitsAbsentBeforeAfter) {
     comms::ChangeAuditRecord<int> r;  // create: only `after`
-    r.username = "bob";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("bob"));
     r.timestamp = audit_ts();
     r.after = 5;
 
@@ -722,7 +836,7 @@ TEST(Json, ChangeAuditRecordOmitsAbsentBeforeAfter) {
 
 TEST(Json, ChangeAuditRecordStructValueRoundTrip) {
     comms::ChangeAuditRecord<std::string> r;
-    r.username = "carol";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("carol"));
     r.timestamp = audit_ts();
     r.before = std::string{"old"};
     r.after = std::string{"new"};
@@ -737,10 +851,10 @@ TEST(Json, ChangeAuditRecordStructValueRoundTrip) {
 TEST(Json, AuditRecordsArrayRoundTrip) {
     comms::AuditRecords log{5};  // cap above the element count → exact round-trip
     comms::AuditRecord a;
-    a.username = "a";
+    a.set_identity(comms::make_identity<comms::UserIdentity>("a"));
     a.timestamp = audit_ts();
     comms::AuditRecord b;
-    b.username = "b";
+    b.set_identity(comms::make_identity<comms::UserIdentity>("b"));
     b.timestamp = audit_ts();
     log.push(a);
     log.push(b);
@@ -756,7 +870,7 @@ TEST(Json, AuditRecordsArrayRoundTrip) {
 TEST(Json, ChangeAuditRecordsArrayRoundTrip) {
     comms::ChangeAuditRecords<int> log{5};
     comms::ChangeAuditRecord<int> r;
-    r.username = "a";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("a"));
     r.timestamp = audit_ts();
     r.after = 1;
     log.push(r);

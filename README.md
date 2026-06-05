@@ -372,14 +372,56 @@ then round-trip through `ReasonPtr` automatically. These hooks live in
 header rather than in `json.hpp`; the trade-off is that the JSON gate must be
 resolved identically across your whole build (it affects `IReason`'s vtable).
 
+### `comms::Identity` / `comms::Ability`
+
+A shared **authentication + authorization** vocabulary: *who* a principal is
+(`comms::IIdentity`) and *what* it may do (`comms::IAbility`). Both are
+**polymorphic open sets** built exactly like `IOrigin` / `IReason` — a `kind()`
+discriminator supplied by an `AbilityKind<"kind", Derived>` /
+`IdentityKind<"kind", Derived>` CRTP base (wiring `clone()` and an optional
+`DisplayInfo`-backed `info()`), self-registration into a program-wide
+`GlobalAbilityRegistry` / `GlobalIdentityRegistry`, and the one-line
+`COMMONS_DEFINE_ABILITY(Ident, "kind")` / `COMMONS_DEFINE_IDENTITY(Ident, "kind")`
+macros (plus `COMMONS_REGISTER_*` for a hand-written kind). `AbilityPtr` /
+`IdentityPtr` are the owning handles and `make_ability<A>` / `make_identity<I>`
+the factories.
+
+The check reads **`required.allowed(subject)`**: the *required* ability is the
+receiver and the argument is the candidate that must satisfy it
+(`read_perm.allowed(admin_role)`, `read_perm.allowed(user)`). The default
+`IAbility::allowed` is "same kind + same `value`"; a kind owns its own rule by
+overriding it. An identity holds a list of `abilities`, and
+`identity.satisfies(required)` (equivalently `required.allowed(identity)`) tries
+each held ability against the requirement. Built-in abilities are `RoleAbility`
+(`value` = role name), the extensible `RecordPermissionAbility` (an
+`action`/`resource` pair matched with a `"*"` wildcard — the worked example of a
+kind that overrides `allowed`/`equals`/the JSON hooks), and the macro-defined
+`GenericAbility` / `UnknownAbility`. Built-in identities are the value-carrying
+`UserIdentity` / `ServerIdentity` / `ApiClientIdentity` / `UnknownIdentity`,
+`RootIdentity` (satisfies **everything**), and `NoIdentity` (satisfies
+**nothing** — the `AuditRecord` default, so a record's principal is never null).
+
+JSON (when `COMMONS_WITH_NLOHMANN_JSON` is on): an ability/identity round-trips
+as `{"kind","value", …}` (an identity adds an `abilities` array when non-empty),
+resolving `kind` through the registry so a pointer deserializes back to the right
+concrete kind (an unknown kind throws). Like `reason.hpp`, **Identity/Ability
+keep their per-field (de)serialization in gated virtual `write_json` / `read_json`
+hooks in their own headers** (so a sub-kind extends the JSON by overriding them) —
+the same vtable/uniform-gate caveat applies.
+
 ### `comms::AuditRecord` family
 
 A small family of value types for an **audit trail** — *who* did *what*, *when*,
-*from where*. `comms::AuditRecord` is the base record: a required `username`, a
-`timestamp` (a real `time_point` defaulting to `now()`, like
-`IReason::created_at`), optional request context (`ip`, `user_agent`,
-`session_id`), a `related_ids` map (name → id string), and a free-form
-`metadata` bag (`comms::Metadata`, empty by default). Ids are stored as
+*from where*. `comms::AuditRecord` is the base record: an `identity` (a
+polymorphic `comms::IdentityPtr` defaulting to `comms::NoIdentity` — never null;
+set it with `set_identity(make_identity<UserIdentity>("alice"))`), a `timestamp`
+(a real `time_point` defaulting to `now()`, like `IReason::created_at`), optional
+request context (`ip`, `user_agent`, `session_id`), a `related_ids` map (name → id
+string), and a free-form `metadata` bag (`comms::Metadata`, empty by default).
+Because the owning `identity` pointer is neither copyable nor
+defaulted-comparable, `AuditRecord` is **not** an aggregate: its copy operations
+deep-clone the identity (move is defaulted) and `operator==` is hand-written
+(comparing the identity with `comms::identity_equal`). Ids are stored as
 **strings**: the templated `set_session_id(id)` / `add_related_id(name, id)`
 helpers take any `comms::Id<Tag, Repr>` and capture `comms::to_string(id)`, so a
 single record can reference ids of different kinds (which a heterogeneous
@@ -397,8 +439,9 @@ build/config **value-override seam**, default 3, wired exactly like the
 the two ready-made aliases.
 
 JSON (when `COMMONS_WITH_NLOHMANN_JSON` is on): an `AuditRecord` is an object
-that always carries `username` + `timestamp` (epoch milliseconds), with the
-optional fields emitted only when present/non-empty; a `ChangeAuditRecord<T>`
+that always carries `identity` (a `{"kind", …}` object) + `timestamp` (epoch
+milliseconds), with the optional fields emitted only when present/non-empty; a
+`ChangeAuditRecord<T>`
 adds `before` / `after`; an `AuditLog` is a JSON array of records. Capacity is
 **not** serialized, so a log read back under a smaller cap keeps the newest N (a
 within-capacity log round-trips exactly). The millisecond encoding truncates
@@ -791,13 +834,46 @@ int main() {
 }
 ```
 
+### Authn/authz with Identity & Ability
+
+```cpp
+#include <commons/ability.hpp>
+#include <commons/identity.hpp>
+
+int main() {
+    namespace c = comms;
+
+    // A required ability is the receiver; the candidate is the argument.
+    const c::RoleAbility admin_required{"admin"};
+    admin_required.allowed(c::RoleAbility{"admin"});   // true  (same kind + value)
+    admin_required.allowed(c::RoleAbility{"editor"});  // false
+
+    // RecordPermissionAbility matches an action/resource pair, "*" is a wildcard.
+    const c::RecordPermissionAbility read_order{"read", "order"};
+    read_order.allowed(c::RecordPermissionAbility{"*", "order"});  // true
+
+    // An identity holds abilities; required.allowed(identity) ==
+    // identity.satisfies(required).
+    auto user = c::make_identity<c::UserIdentity>("alice");
+    user->add_ability(c::make_ability<c::RoleAbility>("admin"));
+    admin_required.allowed(*user);   // true
+    user->satisfies(admin_required); // true (equivalent)
+
+    // Root allows everything; None (the AuditRecord default) allows nothing.
+    admin_required.allowed(*c::make_identity<c::RootIdentity>());  // true
+    admin_required.allowed(*c::make_identity<c::NoIdentity>());    // false
+}
+```
+
 ### Recording audit trails
 
 ```cpp
 #include <commons/audit_record.hpp>
+#include <commons/identity.hpp>
 
 #include <iostream>
 #include <string>
+#include <utility>
 
 COMMONS_DEFINE_UINT64_ID(OrderId, "order");
 COMMONS_DEFINE_STRING_ID(TenantId, "tenant");
@@ -805,19 +881,19 @@ COMMONS_DEFINE_STRING_ID(TenantId, "tenant");
 int main() {
     namespace c = comms;
 
-    // who / what / when / from where. username is required; timestamp defaults
-    // to now(); the rest are optional.
+    // who / what / when / from where. identity defaults to NoIdentity (never
+    // null); timestamp defaults to now(); the rest are optional.
     c::AuditRecord rec;
-    rec.username = "alice";
+    rec.set_identity(c::make_identity<c::UserIdentity>("alice"));
     rec.ip = "192.0.2.1";
-    rec.set_session_id(OrderId{42});               // stored as "42"
-    rec.add_related_id("order", OrderId{1001});    // ids of any kind, by string
+    rec.set_session_id(OrderId{42U});              // stored as "42"
+    rec.add_related_id("order", OrderId{1001U});   // ids of any kind, by string
     rec.add_related_id("tenant", TenantId{"acme"});
     rec.metadata["action"] = c::md::Value{"checkout"};
 
     // before/after for a change; absent on create/delete respectively.
     c::ChangeAuditRecord<std::string> change;
-    change.username = "bob";
+    change.set_identity(c::make_identity<c::UserIdentity>("bob"));
     change.before = std::string{"pending"};
     change.after = std::string{"shipped"};
 
@@ -825,11 +901,11 @@ int main() {
     c::AuditRecords log{2};                         // hold at most 2
     for (const auto* who : {"alice", "bob", "carol"}) {
         c::AuditRecord r;
-        r.username = who;
+        r.set_identity(c::make_identity<c::UserIdentity>(who));
         log.push(std::move(r));
     }
     std::cout << log.size() << " kept, oldest is "
-              << log.front().username << "\n";       // 2 kept, oldest is bob
+              << log.front().identity->value << "\n";  // 2 kept, oldest is bob
 }
 ```
 
@@ -877,10 +953,14 @@ unknown kind throws; a custom kind brings its own `to_json`/`from_json`);
 `PrioritizedSet<T>` ⇄ a sorted array — both only when `T` is itself
 JSON-serializable; `Id<Tag, Repr>` ⇄ the inner `Repr`'s natural JSON (a number
 for the uint reprs, a string for `std::string`, the ULID string when ULID is
-also enabled); `AuditRecord` ⇄ an object with `username` + millisecond
-`timestamp` and the optional fields omitted when absent/empty,
-`ChangeAuditRecord<T>` adds `before`/`after`, and `AuditLog<Record>` ⇄ a JSON
-array of records (capacity is not serialized).
+also enabled); `AbilityPtr`/`IdentityPtr` ⇄ a `{"kind","value", …}` object (an
+identity adds an `abilities` array when non-empty), with `kind` resolved back
+through the `GlobalAbilityRegistry`/`GlobalIdentityRegistry` (an unknown kind
+throws) and per-field work in gated virtual `write_json`/`read_json` hooks so a
+sub-kind extends the JSON by overriding them; `AuditRecord` ⇄ an object with
+`identity` + millisecond `timestamp` and the optional fields omitted when
+absent/empty, `ChangeAuditRecord<T>` adds `before`/`after`, and
+`AuditLog<Record>` ⇄ a JSON array of records (capacity is not serialized).
 
 ## Error handling
 
@@ -958,27 +1038,29 @@ synchronized; treat concurrent mutation as unsafe.
 
 ## API overview
 
-| Header                           | Provides                                                                                                                                                                                         |
-|----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `commons/commons.hpp`            | Umbrella header (all core types + JSON hooks).                                                                                                                                                   |
-| `commons/version.hpp`            | Generated from `version.hpp.in` by the build: `COMMONS_VERSION_MAJOR/MINOR/PATCH/STRING` macros and the `comms::version` / `version_major` / `version_minor` / `version_patch` constants.        |
-| `commons/types.hpp`              | `i8`…`u64`, `f32`/`f64`, `usize`/`isize`, complex aliases (`cs8`…`cs64`, `cu8`…`cu64`, `cf32`/`cf64`), and `i128`/`u128` (gated by `COMMONS_HAS_INT128`).                                        |
-| `commons/fixed_string.hpp`       | `comms::FixedString<N>` — structural, NTTP-friendly fixed string.                                                                                                                                |
-| `commons/color.hpp`              | `comms::Color`, `comms::Hsl`/`comms::Hsv`, and `comms::Colors::css` / `comms::Colors::mui` palettes.                                                                                             |
-| `commons/icon.hpp`               | `comms::Icon` — an Iconify `set:name` identifier; `Icon::from` / `Icon::parse`.                                                                                                                  |
-| `commons/icons.hpp`              | Opt-in predefined catalogs: `comms::Icons::mdi::...`. Not pulled by the umbrella.                                                                                                                |
-| `commons/literals.hpp`           | The `comms::literals` user-defined literals: `"#6366f1"_color` and `"mdi:home"_icon` (both `consteval`).                                                                                         |
-| `commons/display_info.hpp`       | `comms::DisplayInfo`, the `comms::HasDisplayInfo<T>` trait, free `comms::display_info<T>()`, and the `comms::Displayable<T>` concept.                                                            |
-| `commons/flag.hpp`               | `comms::Flag`/`FlagCategory`, `FlagRef`, `FlagSet`, `GlobalFlagRegistry`, the `IHasFlags`/`HasFlags`/`FlagBuilderMixin`/`FlagBuilderGetters` mixins, and the `COMMONS_*_FLAG*` macros.           |
-| `commons/origin.hpp`             | `comms::IOrigin`/`OriginPtr`, the `OriginKind<FixedString, Derived>` CRTP base, built-in `Core`/`Internal`/`External`/`Unknown` origins, `GlobalOriginRegistry`, `COMMONS_REGISTER_ORIGIN`.      |
-| `commons/prioritized.hpp`        | `comms::Prioritized`, `get_priority`, the comparators, `PrioritizedSet<T>`, `PrioritizedBuilder<Derived>`, and `WithPriority<T>` / `with_priority` / `make_prioritized`.                         |
-| `commons/semver.hpp`             | `comms::SemVer` — a Semantic Versioning 2.0.0 value; non-throwing `SemVer::parse`, full §11 ordering, `std::hash`.                                                                               |
-| `commons/version_constraint.hpp` | `comms::VersionConstraint` — an npm-style semver range answering `satisfies(SemVer)`; `VersionConstraint::parse` throws on a malformed sub-version.                                              |
-| `commons/id.hpp`                 | `comms::Id<Tag, Repr>` — strong-typed identifier; `Uint{8,16,32,64}Id`/`StringId`/`UlidId` aliases, `to_string`/`display_string`, and the `COMMONS_DEFINE_*_ID` macros.                          |
-| `commons/audit_record.hpp`       | `comms::AuditRecord`, `ChangeAuditRecord<T>`, the capped `AuditLog<Record>` (and the `AuditRecords` / `ChangeAuditRecords<T>` aliases); the `COMMONS_AUDIT_RECORDS_CAPACITY` capacity seam.      |
-| `commons/metadata.hpp`           | `comms::md::Value`/`Array`/`Object` (and the `comms::Metadata` root alias) — a dynamic value tree with path lookup, deep merge, hashing, and `operator<<`/`std::format`; `MetadataError` family. |
-| `commons/config.hpp`             | The `COMMONS_WITH_*` feature-gate macros.                                                                                                                                                        |
-| `commons/json.hpp`               | Optional nlohmann/json hooks (inert unless the dependency is present). A thin umbrella over per-type modules in `commons/json/<name>.hpp`.                                                       |
+| Header                           | Provides                                                                                                                                                                                                                                                       |
+|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `commons/commons.hpp`            | Umbrella header (all core types + JSON hooks).                                                                                                                                                                                                                 |
+| `commons/version.hpp`            | Generated from `version.hpp.in` by the build: `COMMONS_VERSION_MAJOR/MINOR/PATCH/STRING` macros and the `comms::version` / `version_major` / `version_minor` / `version_patch` constants.                                                                      |
+| `commons/types.hpp`              | `i8`…`u64`, `f32`/`f64`, `usize`/`isize`, complex aliases (`cs8`…`cs64`, `cu8`…`cu64`, `cf32`/`cf64`), and `i128`/`u128` (gated by `COMMONS_HAS_INT128`).                                                                                                      |
+| `commons/fixed_string.hpp`       | `comms::FixedString<N>` — structural, NTTP-friendly fixed string.                                                                                                                                                                                              |
+| `commons/color.hpp`              | `comms::Color`, `comms::Hsl`/`comms::Hsv`, and `comms::Colors::css` / `comms::Colors::mui` palettes.                                                                                                                                                           |
+| `commons/icon.hpp`               | `comms::Icon` — an Iconify `set:name` identifier; `Icon::from` / `Icon::parse`.                                                                                                                                                                                |
+| `commons/icons.hpp`              | Opt-in predefined catalogs: `comms::Icons::mdi::...`. Not pulled by the umbrella.                                                                                                                                                                              |
+| `commons/literals.hpp`           | The `comms::literals` user-defined literals: `"#6366f1"_color` and `"mdi:home"_icon` (both `consteval`).                                                                                                                                                       |
+| `commons/display_info.hpp`       | `comms::DisplayInfo`, the `comms::HasDisplayInfo<T>` trait, free `comms::display_info<T>()`, and the `comms::Displayable<T>` concept.                                                                                                                          |
+| `commons/flag.hpp`               | `comms::Flag`/`FlagCategory`, `FlagRef`, `FlagSet`, `GlobalFlagRegistry`, the `IHasFlags`/`HasFlags`/`FlagBuilderMixin`/`FlagBuilderGetters` mixins, and the `COMMONS_*_FLAG*` macros.                                                                         |
+| `commons/origin.hpp`             | `comms::IOrigin`/`OriginPtr`, the `OriginKind<FixedString, Derived>` CRTP base, built-in `Core`/`Internal`/`External`/`Unknown` origins, `GlobalOriginRegistry`, `COMMONS_REGISTER_ORIGIN`.                                                                    |
+| `commons/prioritized.hpp`        | `comms::Prioritized`, `get_priority`, the comparators, `PrioritizedSet<T>`, `PrioritizedBuilder<Derived>`, and `WithPriority<T>` / `with_priority` / `make_prioritized`.                                                                                       |
+| `commons/semver.hpp`             | `comms::SemVer` — a Semantic Versioning 2.0.0 value; non-throwing `SemVer::parse`, full §11 ordering, `std::hash`.                                                                                                                                             |
+| `commons/version_constraint.hpp` | `comms::VersionConstraint` — an npm-style semver range answering `satisfies(SemVer)`; `VersionConstraint::parse` throws on a malformed sub-version.                                                                                                            |
+| `commons/id.hpp`                 | `comms::Id<Tag, Repr>` — strong-typed identifier; `Uint{8,16,32,64}Id`/`StringId`/`UlidId` aliases, `to_string`/`display_string`, and the `COMMONS_DEFINE_*_ID` macros.                                                                                        |
+| `commons/ability.hpp`            | `comms::IAbility`/`AbilityPtr`, the `AbilityKind<FixedString, Derived>` CRTP base, built-in `Role`/`RecordPermission`/`Generic`/`Unknown` abilities, `GlobalAbilityRegistry`, `make_ability`, `COMMONS_DEFINE_ABILITY`/`COMMONS_REGISTER_ABILITY`.             |
+| `commons/identity.hpp`           | `comms::IIdentity`/`IdentityPtr`, the `IdentityKind<FixedString, Derived>` CRTP base, built-in `User`/`Server`/`ApiClient`/`Unknown`/`Root`/`No` identities, `GlobalIdentityRegistry`, `make_identity`, `COMMONS_DEFINE_IDENTITY`/`COMMONS_REGISTER_IDENTITY`. |
+| `commons/audit_record.hpp`       | `comms::AuditRecord`, `ChangeAuditRecord<T>`, the capped `AuditLog<Record>` (and the `AuditRecords` / `ChangeAuditRecords<T>` aliases); the `COMMONS_AUDIT_RECORDS_CAPACITY` capacity seam.                                                                    |
+| `commons/metadata.hpp`           | `comms::md::Value`/`Array`/`Object` (and the `comms::Metadata` root alias) — a dynamic value tree with path lookup, deep merge, hashing, and `operator<<`/`std::format`; `MetadataError` family.                                                               |
+| `commons/config.hpp`             | The `COMMONS_WITH_*` feature-gate macros.                                                                                                                                                                                                                      |
+| `commons/json.hpp`               | Optional nlohmann/json hooks (inert unless the dependency is present). A thin umbrella over per-type modules in `commons/json/<name>.hpp`.                                                                                                                     |
 
 ## Examples
 
@@ -995,6 +1077,7 @@ Each example is a self-contained program under `examples/`.
 | `examples/prioritized.cpp`          | The builder mixin, both `WithPriority` flavors, `PrioritizedSet`, and the comparators.                                              |
 | `examples/semver.cpp`               | Parsing, full-precedence sorting, `std::format`, and `VersionConstraint` range checks.                                              |
 | `examples/id.cpp`                   | The `Id<Tag, Repr>` macros, `display_string`, inherited formatter specs, and the ULID repr.                                         |
+| `examples/identity_ability.cpp`     | `required.allowed(subject)` for roles and record permissions, an identity holding abilities, and `Root`/`No` identities.            |
 | `examples/audit_record.cpp`         | `AuditRecord` fields and id helpers, `ChangeAuditRecord<T>` before/after, and the capped `AuditLog`.                                |
 | `examples/metadata/`                | The `comms::md` tree: `basic`, `object_helpers`, `nested`, `merge`, `path_lookup`, `format_output`, and `json_integration` (gated). |
 | `examples/json_integration.cpp`     | The optional nlohmann/json round-trips (requires the integration).                                                                  |

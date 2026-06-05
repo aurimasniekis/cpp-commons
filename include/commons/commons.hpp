@@ -7,6 +7,7 @@
 /// Including this is always safe: `commons/json.hpp` guards its body behind
 /// `COMMONS_WITH_NLOHMANN_JSON` and stays inert when nlohmann/json is absent.
 
+#include <commons/ability.hpp>
 #include <commons/audit_record.hpp>
 #include <commons/color.hpp>
 #include <commons/config.hpp>
@@ -16,6 +17,7 @@
 #include <commons/flag.hpp>
 #include <commons/icon.hpp>
 #include <commons/id.hpp>
+#include <commons/identity.hpp>
 #include <commons/literals.hpp>
 #include <commons/metadata.hpp>
 #include <commons/origin.hpp>

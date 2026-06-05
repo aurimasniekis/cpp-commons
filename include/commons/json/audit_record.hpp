@@ -4,11 +4,11 @@
 /// @brief The `comms::AuditRecord` family ⇄ nlohmann/json (gated by
 ///        `COMMONS_WITH_NLOHMANN_JSON`).
 ///
-///   - `AuditRecord` ⇄ object: always `username` + `timestamp` (epoch
-///     milliseconds, like `comms::IReason::created_at`); `ip`/`user_agent`/
-///     `session_id` only when present, and `related_ids` / `metadata` only when
-///     non-empty. The millisecond encoding truncates sub-millisecond
-///     `system_clock` ticks.
+///   - `AuditRecord` ⇄ object: always `identity` (a `{"kind", ...}` object) +
+///     `timestamp` (epoch milliseconds, like `comms::IReason::created_at`);
+///     `ip`/`user_agent`/`session_id` only when present, and `related_ids` /
+///     `metadata` only when non-empty. The millisecond encoding truncates
+///     sub-millisecond `system_clock` ticks.
 ///   - `ChangeAuditRecord<T>` ⇄ the base fields plus `before` / `after` (only
 ///     when present). A function template, instantiated only for a `T` that is
 ///     itself json-serializable.
@@ -23,6 +23,7 @@
 #if COMMONS_WITH_NLOHMANN_JSON
 
 #include <commons/audit_record.hpp>
+#include <commons/json/identity.hpp>
 #include <commons/json/metadata.hpp>
 #include <commons/json/optional.hpp>
 
@@ -39,7 +40,7 @@ namespace comms {
 
 inline void to_json(::nlohmann::json& j, const AuditRecord& r) {
     j = ::nlohmann::json::object();
-    j["username"] = r.username;
+    j["identity"] = r.identity;  // IdentityPtr via adl_serializer<IdentityPtr>; always present
     j["timestamp"] =
         std::chrono::duration_cast<std::chrono::milliseconds>(r.timestamp.time_since_epoch())
             .count();
@@ -62,8 +63,9 @@ inline void to_json(::nlohmann::json& j, const AuditRecord& r) {
 
 inline void from_json(const ::nlohmann::json& j, AuditRecord& r) {
     r = AuditRecord{};
-    if (const auto it = j.find("username"); it != j.end() && !it->is_null()) {
-        it->get_to(r.username);
+    // Absent/null identity keeps the NoIdentity default — a record is never null.
+    if (const auto it = j.find("identity"); it != j.end() && !it->is_null()) {
+        it->get_to(r.identity);
     }
     if (const auto it = j.find("timestamp"); it != j.end() && !it->is_null()) {
         r.timestamp =

@@ -1,6 +1,7 @@
 #include <commons/audit_record.hpp>
 #include <commons/config.hpp>
 #include <commons/id.hpp>
+#include <commons/identity.hpp>
 
 #include <gtest/gtest.h>
 
@@ -21,7 +22,9 @@ COMMONS_DEFINE_ULID_ID(EventId, "event");
 
 TEST(AuditRecord, Defaults) {
     const comms::AuditRecord r;
-    EXPECT_TRUE(r.username.empty());
+    // identity defaults to NoIdentity (never null).
+    ASSERT_NE(r.identity, nullptr);
+    EXPECT_EQ(r.identity->kind(), "none");
     EXPECT_FALSE(r.ip.has_value());
     EXPECT_FALSE(r.user_agent.has_value());
     EXPECT_FALSE(r.session_id.has_value());
@@ -33,10 +36,12 @@ TEST(AuditRecord, Defaults) {
 
 TEST(AuditRecord, DirectFieldAssignment) {
     comms::AuditRecord r;
-    r.username = "alice";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("alice"));
     r.ip = "192.0.2.1";
     r.user_agent = "curl/8.0";
-    EXPECT_EQ(r.username, "alice");
+    ASSERT_NE(r.identity, nullptr);
+    EXPECT_EQ(r.identity->kind(), "user");
+    EXPECT_EQ(r.identity->value, "alice");
     ASSERT_TRUE(r.ip.has_value());
     EXPECT_EQ(*r.ip, "192.0.2.1");
     ASSERT_TRUE(r.user_agent.has_value());
@@ -85,14 +90,14 @@ TEST(AuditRecord, Equality) {
     constexpr comms::AuditClock::time_point ts{std::chrono::milliseconds{1'700'000'000'000}};
 
     comms::AuditRecord a;
-    a.username = "alice";
+    a.set_identity(comms::make_identity<comms::UserIdentity>("alice"));
     a.timestamp = ts;
     a.ip = "192.0.2.1";
 
-    comms::AuditRecord b = a;
+    comms::AuditRecord b = a;  // copy deep-clones the identity
     EXPECT_EQ(a, b);
 
-    b.username = "bob";
+    b.set_identity(comms::make_identity<comms::UserIdentity>("bob"));
     EXPECT_NE(a, b);
 
     b = a;

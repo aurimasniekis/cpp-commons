@@ -7,6 +7,8 @@ set(_commons_test_sources
     test_color.cpp
     test_icon.cpp
     test_id.cpp
+    test_ability.cpp
+    test_identity.cpp
     test_audit_record.cpp
     test_change_audit_record.cpp
     test_audit_records.cpp

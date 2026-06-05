@@ -1,5 +1,6 @@
 #include <commons/audit_record.hpp>
 #include <commons/id.hpp>
+#include <commons/identity.hpp>
 
 #include <gtest/gtest.h>
 
@@ -18,11 +19,12 @@ struct Money {
 
 TEST(ChangeAuditRecord, InheritsBaseFieldsAndHelpers) {
     comms::ChangeAuditRecord<int> r;
-    r.username = "alice";
+    r.set_identity(comms::make_identity<comms::UserIdentity>("alice"));
     r.set_session_id(AccountId{5U});
     r.add_related_id("account", AccountId{5U});
 
-    EXPECT_EQ(r.username, "alice");
+    ASSERT_NE(r.identity, nullptr);
+    EXPECT_EQ(r.identity->value, "alice");
     ASSERT_TRUE(r.session_id.has_value());
     EXPECT_EQ(*r.session_id, "5");
     EXPECT_EQ(r.related_ids.at("account"), "5");
@@ -58,7 +60,7 @@ TEST(ChangeAuditRecord, CreateUpdateDelete) {
 
 TEST(ChangeAuditRecord, EqualityOverBaseAndValues) {
     comms::ChangeAuditRecord<Money> a;
-    a.username = "alice";
+    a.set_identity(comms::make_identity<comms::UserIdentity>("alice"));
     a.before = Money{100, "USD"};
     a.after = Money{200, "USD"};
 
@@ -66,7 +68,7 @@ TEST(ChangeAuditRecord, EqualityOverBaseAndValues) {
     EXPECT_EQ(a, b);
 
     // Differ in a base field.
-    b.username = "bob";
+    b.set_identity(comms::make_identity<comms::UserIdentity>("bob"));
     EXPECT_NE(a, b);
 
     // Differ in after.

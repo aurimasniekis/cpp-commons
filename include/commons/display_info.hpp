@@ -53,6 +53,14 @@ template <typename T>
 concept HasMemberDisplayInfo = requires {
     { T::display_info() } -> std::same_as<const DisplayInfo&>;
 };
+
+/// The `info()` fallback for a polymorphic kind that defines no
+/// `display_info()` (used by the `ReasonKind` / `AbilityKind` / `IdentityKind`
+/// CRTP bases when `Derived` is not `HasMemberDisplayInfo`).
+[[nodiscard]] inline const DisplayInfo& empty_display_info() {
+    static const DisplayInfo empty{};
+    return empty;
+}
 }  // namespace detail
 
 /// Customization point: the primary template forwards to a member

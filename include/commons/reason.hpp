@@ -71,6 +71,7 @@
 /// `title()` per kind to customize.
 
 #include <commons/config.hpp>
+#include <commons/detail/type_name.hpp>
 #include <commons/display_info.hpp>
 #include <commons/exception.hpp>
 #include <commons/fixed_string.hpp>
@@ -79,7 +80,6 @@
 #include <chrono>
 #include <compare>
 #include <concepts>
-#include <cstdlib>
 #include <format>
 #include <functional>
 #include <map>
@@ -91,10 +91,6 @@
 #include <typeinfo>
 #include <utility>
 #include <vector>
-
-#if defined(__GNUC__) || defined(__clang__)
-#include <cxxabi.h>
-#endif
 
 #if COMMONS_WITH_NLOHMANN_JSON
 #include <commons/json/metadata.hpp>  // comms::md::Object ⇄ json, for the metadata field
@@ -110,39 +106,6 @@ namespace comms {
 using ReasonClock = std::chrono::system_clock;
 
 namespace detail {
-/// A human title for `ti`: the demangled type name reduced to its final
-/// identifier (enclosing namespaces — including `(anonymous namespace)` — and
-/// any template arguments stripped). Backs the default `IReason::title()`.
-[[nodiscard]] inline std::string demangle_type_name(const std::type_info& ti) {
-    std::string name;
-#if defined(__GNUC__) || defined(__clang__)
-    int status = 0;
-    // __cxa_demangle returns a malloc'd buffer we must free; the manual
-    // malloc/free is intrinsic to the Itanium ABI and confined to these lines.
-    // NOLINTBEGIN(cppcoreguidelines-no-malloc, cppcoreguidelines-owning-memory)
-    char* demangled = abi::__cxa_demangle(ti.name(), nullptr, nullptr, &status);
-    name = (status == 0 && demangled != nullptr) ? demangled : ti.name();
-    std::free(demangled);  // free(nullptr) is a no-op
-    // NOLINTEND(cppcoreguidelines-no-malloc, cppcoreguidelines-owning-memory)
-#else
-    name = ti.name();
-    // MSVC prefixes the readable name with "class "/"struct ".
-    for (const std::string_view prefix : {"class ", "struct "}) {
-        if (name.starts_with(prefix)) {
-            name.erase(0, prefix.size());
-            break;
-        }
-    }
-#endif
-    if (const auto lt = name.find('<'); lt != std::string::npos) {
-        name.erase(lt);  // drop template args (and any "::" inside them)
-    }
-    if (const auto pos = name.rfind("::"); pos != std::string::npos) {
-        name.erase(0, pos + 2);  // drop namespace / enclosing-scope qualification
-    }
-    return name;
-}
-
 /// `demangle_type_name(ti)` with the reason `code` appended in parens — e.g.
 /// `GenericReason(123)`. The `title()` form the generic/unknown built-ins use,
 /// which always carry a code.
@@ -239,15 +202,6 @@ protected:
 /// An owning handle to a reason. The canonical way to carry an `IReason` by
 /// value.
 using ReasonPtr = std::unique_ptr<IReason>;
-
-namespace detail {
-/// The `info()` fallback for a reason kind that defines no `display_info()`.
-/// (`HasMemberDisplayInfo` lives in `display_info.hpp`.)
-[[nodiscard]] inline const DisplayInfo& empty_display_info() {
-    static const DisplayInfo empty{};
-    return empty;
-}
-}  // namespace detail
 
 /// CRTP base wiring `kind()`, `clone()`, and `info()` from a compile-time kind
 /// string and the concrete `Derived` type, over an `Interface` that is either
@@ -690,7 +644,7 @@ private:
     clone_failure(const IFailureReason& reason) {
         // The clone's dynamic type is `reason`'s — an IFailureReason subclass —
         // so this downcast is provably safe; static_cast avoids the RTTI check.
-        IReason* raw = reason.clone().release();
+        const IReason* raw = reason.clone().release();
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
         return std::shared_ptr<const IFailureReason>{static_cast<const IFailureReason*>(raw)};
     }
@@ -716,7 +670,7 @@ public:
     // Clone self and hand the typed copy to the exception. `*this` is an
     // IFailureReason, so the clone's dynamic type is too — this downcast is
     // provably safe; static_cast avoids the RTTI check.
-    IReason* raw = clone().release();
+    const IReason* raw = clone().release();
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
     std::shared_ptr<const IFailureReason> failure{static_cast<const IFailureReason*>(raw)};
     throw FailureReasonException(std::move(failure));

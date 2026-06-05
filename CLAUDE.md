@@ -139,16 +139,17 @@ program-wide `GlobalReasonRegistry` via `COMMONS_REGISTER_REASON(Type)` (mirrori
 `CancelException` as sibling `ReasonException`s. A reason round-trips as
 `{"kind","code","message","created_at"}` (timestamp as epoch milliseconds), plus
 a `"metadata"` object when that bag is non-empty (omitted when empty).
-**Reason is the one exception to the "JSON lives only in `json.hpp`" rule:** the
-per-field (de)serializers are the **virtual** `IReason::write_json` / `read_json`
-hooks *in `reason.hpp`*, gated by `COMMONS_WITH_NLOHMANN_JSON` (so nlohmann is
-still pulled only when present) — a sub-reason adds its own fields by overriding
-them (calling the base first) and they round-trip through `ReasonPtr`
-automatically. `json.hpp` only carries the `adl_serializer<ReasonPtr>` /
-`adl_serializer<FailureReasonPtr>` that resolve `kind` through the registry and
-drive those hooks. Because the gate adds virtual members it changes `IReason`'s
-vtable, so **every TU in a build must resolve `COMMONS_WITH_NLOHMANN_JSON`
-identically** (force it with a `-D` if the build is mixed).
+**Reason is one of the exceptions to the "JSON lives only in `json.hpp`" rule**
+(`IAbility`/`IIdentity` are the others — see below): the per-field
+(de)serializers are the **virtual** `IReason::write_json` / `read_json` hooks *in
+`reason.hpp`*, gated by `COMMONS_WITH_NLOHMANN_JSON` (so nlohmann is still pulled
+only when present) — a sub-reason adds its own fields by overriding them (calling
+the base first) and they round-trip through `ReasonPtr` automatically. `json.hpp`
+only carries the `adl_serializer<ReasonPtr>` / `adl_serializer<FailureReasonPtr>`
+that resolve `kind` through the registry and drive those hooks. Because the gate
+adds virtual members it changes `IReason`'s vtable, so **every TU in a build must
+resolve `COMMONS_WITH_NLOHMANN_JSON` identically** (force it with a `-D` if the
+build is mixed).
 
 The `comms::md` namespace (`metadata.hpp`) is a JSON-like **dynamic value tree**.
 `comms::md::Value` is a discriminated union of null/bool/`i64`/`u64`/`float`/
@@ -171,16 +172,59 @@ carries no nlohmann; the `Value`/`Object`/`Array` JSON round-trip lives in
 `commons/json/metadata.hpp` (pulled by the `commons/json.hpp` umbrella) under
 `COMMONS_WITH_NLOHMANN_JSON`.
 
+The `comms::IAbility` (`ability.hpp`) and `comms::IIdentity` (`identity.hpp`)
+families are a shared **authn/authz** vocabulary — *what* a principal may do and
+*who* it is — built as **polymorphic open sets** exactly like `IOrigin`/
+`IReason`: a `kind()` discriminator supplied by an `AbilityKind<"kind", Derived>`
+/ `IdentityKind<"kind", Derived>` CRTP base (wiring `clone()` and an optional
+`DisplayInfo`-backed `info()`), self-registration into the program-wide
+`GlobalAbilityRegistry` / `GlobalIdentityRegistry` (`COMMONS_REGISTER_ABILITY` /
+`_IDENTITY`, with the `kinds()`/`kinds_of<Base>()`/`contains` API), and the
+one-line `COMMONS_DEFINE_ABILITY(Ident,"kind")` / `COMMONS_DEFINE_IDENTITY(...)`
+macros (inheriting the `()`/`(value)` constructors). `AbilityPtr`/`IdentityPtr`
+are the owning handles, `make_ability<A>` / `make_identity<I>` the factories
+(`make_identity` defaults to `NoIdentity`). The authorization check is
+**`required.allowed(subject)`** — the *required* ability is the receiver and the
+candidate (another ability, or a whole identity) is the argument; the default
+`IAbility::allowed(const IAbility&)` is "same kind + same `value`", and a kind
+owns its own rule by overriding it. An identity carries `abilities`, and
+`identity.satisfies(required)` ≡ `required.allowed(identity)` (the
+`IAbility::allowed(const IIdentity&)` overload is declared in `ability.hpp` but
+**defined out-of-line in `identity.hpp`** to break the cycle, which also
+forward-declares `IIdentity`). `IIdentity`'s protected copy ctor deep-clones the
+`abilities` so the CRTP `clone()` works; both bases use a virtual `equals()`
+(and the null-safe free `ability_equal`/`identity_equal`) because `…Ptr` cannot
+use a defaulted `==`. Built-in abilities: `RoleAbility`, the extensible
+`RecordPermissionAbility` (extra `action`/`resource`, `"*"` wildcard — the worked
+example overriding `allowed`/`equals`/JSON), `GenericAbility`, `UnknownAbility`.
+Built-in identities: `UserIdentity`/`ServerIdentity`/`ApiClientIdentity`/
+`UnknownIdentity` (default `satisfies`), `RootIdentity` (`satisfies`→true),
+`NoIdentity` (`satisfies`→false). **Identity/Ability join `reason.hpp` as the
+headers that keep their per-field JSON in gated virtual `write_json`/`read_json`
+hooks** (so a sub-kind extends the JSON by overriding); `json/ability.hpp` /
+`json/identity.hpp` hold only the `adl_serializer<…Ptr>` glue (resolving `kind`
+through the registry, unknown kind throws). Same vtable/uniform-gate caveat as
+`reason.hpp`: every TU must resolve `COMMONS_WITH_NLOHMANN_JSON` identically. The
+shared `detail::demangle_type_name` (backing the default `title()`) now lives in
+`commons/detail/type_name.hpp`, and `detail::empty_display_info` in
+`display_info.hpp`, so `reason.hpp`/`ability.hpp`/`identity.hpp` reuse one
+definition.
+
 The `comms::AuditRecord` family (`audit_record.hpp`) is a shared **audit trail**
 facility — *who* did *what*, *when*, *from where*. `comms::AuditRecord` is the
-base value type: a required `username`, a `timestamp` (a real `AuditClock`
-`time_point` defaulting to `now()`, mirroring `reason.hpp`'s `created_at`),
-optional `ip`/`user_agent`/`session_id`, a `related_ids` `map<string,string>`
-(name → id string), and a `comms::Metadata` bag (empty by default). Ids are
-stored as **strings** because `Id<Tag,Repr>` has no type-erased form — the
-templated `set_session_id(id)` / `add_related_id(name, id)` helpers capture
-`comms::to_string(id)` so a single record can reference ids of different kinds.
-It is `operator==`-only (no `<=>`: `Metadata` is equality-only).
+base value type: an `identity` (a `comms::IdentityPtr` defaulting to
+`comms::NoIdentity` — never null; `set_identity(make_identity<UserIdentity>(...))`),
+a `timestamp` (a real `AuditClock` `time_point` defaulting to `now()`, mirroring
+`reason.hpp`'s `created_at`), optional `ip`/`user_agent`/`session_id`, a
+`related_ids` `map<string,string>` (name → id string), and a `comms::Metadata`
+bag (empty by default). Ids are stored as **strings** because `Id<Tag,Repr>` has
+no type-erased form — the templated `set_session_id(id)` / `add_related_id(name,
+id)` helpers capture `comms::to_string(id)` so a single record can reference ids
+of different kinds. Because `IdentityPtr` is non-copyable/non-comparable,
+`AuditRecord` is **not** an aggregate: its copy ctor/copy-assign deep-clone the
+identity (move defaulted) and its `operator==` is hand-written (identity compared
+with `identity_equal`); it is `operator==`-only (no `<=>`: `Metadata` is
+equality-only).
 `comms::ChangeAuditRecord<T>` publicly inherits `AuditRecord` and adds
 `before`/`after` as `std::optional<T>` (absent on create/delete). `comms::AuditLog<Record>`
 is a capped, insertion-ordered collection (`push()` appends, drops the oldest
@@ -191,7 +235,7 @@ aliases. **All three types plus the `<chrono>` millisecond timestamp encoding
 live in the single `audit_record.hpp`, and all their JSON hooks in the single
 `commons/json/audit_record.hpp`** (free ADL `to_json`/`from_json`, the
 container/templated forms instantiated only for a serializable `Record`/`T`): an
-`AuditRecord` always emits `username`+`timestamp` (epoch millis) with optional
+`AuditRecord` always emits `identity`+`timestamp` (epoch millis) with optional
 fields omitted when absent/empty, a `ChangeAuditRecord<T>` adds `before`/`after`,
 and an `AuditLog` is a JSON array (capacity is **not** serialized — a log read
 under a smaller cap keeps the newest N). Pulling in `<commons/id.hpp>` for the
@@ -246,11 +290,12 @@ When adding a type, also add, guarded by the matching macro:
   standalone) and is then `#include`d from the umbrella. Class types: free ADL
   functions in namespace `comms`. Fundamental/`std` types (e.g. the 128-bit
   aliases, `std::complex`, `std::optional`): an `nlohmann::adl_serializer<T>`
-  specialization — ADL cannot find free functions for builtins. *Sole
-  exception:* `reason.hpp` keeps its per-field (de)serialization in **gated
-  virtual hooks on `IReason`** (so a polymorphic, open-set type's subkinds can
-  extend the JSON by overriding); `commons/json/reason.hpp` then only holds the
-  `adl_serializer<ReasonPtr>` glue. Do this only for a polymorphic open set that
+  specialization — ADL cannot find free functions for builtins. *Exceptions:*
+  `reason.hpp`, `ability.hpp`, and `identity.hpp` keep their per-field
+  (de)serialization in **gated virtual hooks on the base** (`write_json` /
+  `read_json`) so a polymorphic, open-set type's subkinds can extend the JSON by
+  overriding; the matching `commons/json/<name>.hpp` then only holds the
+  `adl_serializer<…Ptr>` glue. Do this only for a polymorphic open set that
   genuinely needs subclass-extensible JSON, and document the vtable/uniform-gate
   caveat.
 

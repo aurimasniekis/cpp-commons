@@ -5,12 +5,12 @@
 ///        *who* did *what*, *when*, *from where*.
 ///
 /// Three value types live here:
-///   - `AuditRecord` — the base record: an actor (`username`, the only required
-///     field), a `timestamp` (a real `time_point` defaulting to `now()`,
-///     mirroring `comms::IReason::created_at`), optional request context
-///     (`ip`, `user_agent`, `session_id`), a `related_ids` map (name → id
-///     string), and a free-form `metadata` bag (`comms::Metadata`, empty by
-///     default).
+///   - `AuditRecord` — the base record: an actor (`identity`, a polymorphic
+///     `comms::IdentityPtr` defaulting to `comms::NoIdentity` — never null), a
+///     `timestamp` (a real `time_point` defaulting to `now()`, mirroring
+///     `comms::IReason::created_at`), optional request context (`ip`,
+///     `user_agent`, `session_id`), a `related_ids` map (name → id string), and
+///     a free-form `metadata` bag (`comms::Metadata`, empty by default).
 ///   - `ChangeAuditRecord<T>` — extends `AuditRecord` with the `before` / `after`
 ///     values of a change (each `std::optional<T>`: a create has no `before`, a
 ///     delete has no `after`).
@@ -28,14 +28,15 @@
 ///
 /// JSON (in `commons/json/audit_record.hpp`, gated by
 /// `COMMONS_WITH_NLOHMANN_JSON`): an `AuditRecord` is an object that always
-/// carries `username` + `timestamp` (epoch milliseconds), with the optional
-/// fields emitted only when present/non-empty; a `ChangeAuditRecord<T>` adds
-/// `before` / `after`; an `AuditLog` is a JSON array of records. The millisecond
-/// encoding truncates sub-millisecond `system_clock` ticks (like
-/// `comms::IReason::created_at`), so use ms-aligned timestamps when an exact
-/// round-trip matters.
+/// carries `identity` (a `{"kind", ...}` object) + `timestamp` (epoch
+/// milliseconds), with the optional fields emitted only when present/non-empty;
+/// a `ChangeAuditRecord<T>` adds `before` / `after`; an `AuditLog` is a JSON
+/// array of records. The millisecond encoding truncates sub-millisecond
+/// `system_clock` ticks (like `comms::IReason::created_at`), so use ms-aligned
+/// timestamps when an exact round-trip matters.
 
 #include <commons/id.hpp>
+#include <commons/identity.hpp>
 #include <commons/metadata.hpp>
 
 #include <chrono>
@@ -64,8 +65,15 @@ namespace comms {
 using AuditClock = std::chrono::system_clock;
 
 /// A single audit-trail entry — who did what, when, from where.
+///
+/// `identity` is a polymorphic `comms::IdentityPtr` (defaulting to
+/// `comms::NoIdentity`, never null). Because that owning pointer is neither
+/// copyable nor defaulted-comparable, this is **not** an aggregate: a
+/// user-defined copy ctor / copy-assign deep-clone the identity (move is
+/// defaulted), and `operator==` is hand-written (the identity is compared with
+/// `comms::identity_equal`).
 struct AuditRecord {
-    std::string username;                                  ///< Actor (required).
+    IdentityPtr identity = make_identity<NoIdentity>();    ///< Principal (NoIdentity by default).
     AuditClock::time_point timestamp = AuditClock::now();  ///< When; JSON: epoch millis.
     std::optional<std::string> ip;                         ///< Source IP (optional).
     std::optional<std::string> user_agent;                 ///< Client user-agent (optional).
@@ -73,10 +81,43 @@ struct AuditRecord {
     std::map<std::string, std::string> related_ids;  ///< name → id string.
     Metadata metadata;                               ///< Free-form context (empty by default).
 
+    AuditRecord() = default;
+    ~AuditRecord() = default;
+
+    // Copy deep-clones the identity (a unique_ptr can't be copied); move is
+    // defaulted (the pointer transfers).
+    AuditRecord(const AuditRecord& o)
+        : identity(o.identity ? o.identity->clone() : nullptr), timestamp(o.timestamp), ip(o.ip),
+          user_agent(o.user_agent), session_id(o.session_id), related_ids(o.related_ids),
+          metadata(o.metadata) {}
+    AuditRecord& operator=(const AuditRecord& o) {
+        if (this != &o) {
+            identity = o.identity ? o.identity->clone() : nullptr;
+            timestamp = o.timestamp;
+            ip = o.ip;
+            user_agent = o.user_agent;
+            session_id = o.session_id;
+            related_ids = o.related_ids;
+            metadata = o.metadata;
+        }
+        return *this;
+    }
+    AuditRecord(AuditRecord&&) = default;
+    AuditRecord& operator=(AuditRecord&&) = default;
+
     // `operator==` only, no `operator<=>`: `comms::Metadata` (`md::Object`) is
-    // equality-only, so a defaulted `<=>` would be implicitly deleted — and
-    // there is no meaningful total order over a heterogeneous record anyway.
-    [[nodiscard]] bool operator==(const AuditRecord&) const = default;
+    // equality-only and `IdentityPtr` is not defaulted-comparable, so equality
+    // is hand-written — and there is no meaningful total order over a record.
+    [[nodiscard]] bool operator==(const AuditRecord& o) const {
+        return identity_equal(identity, o.identity) && timestamp == o.timestamp && ip == o.ip &&
+               user_agent == o.user_agent && session_id == o.session_id &&
+               related_ids == o.related_ids && metadata == o.metadata;
+    }
+
+    /// Set the principal for this record (takes ownership).
+    void set_identity(IdentityPtr who) {
+        identity = std::move(who);
+    }
 
     /// Record the session id from a strong-typed `Id`, captured as its string form.
     template <class Tag, class Repr>
