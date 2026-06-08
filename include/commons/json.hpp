@@ -73,6 +73,11 @@
 ///     `commons/identity.hpp`.
 ///   - `comms::md::Value` / `Object` / `Array` ⇄ their natural JSON shapes
 ///     (null/bool/number/string/array/object), recursively.
+///   - `LifecycleStatus` ⇄ a JSON **string** (the name); `StatusTransition<T>` /
+///     `StatusReport<T>` ⇄ JSON **objects** (timestamps/durations as epoch /
+///     count milliseconds, optional `previous` fields omitted when absent); and
+///     `StatusTransitionTimeline<T>` ⇄ a JSON **array** of transitions
+///     (subscribers are transient and not serialized).
 ///
 /// The fixed-width builtin aliases (`i8`…`u64`, `f32`, `f64`, `usize`,
 /// `isize`) need nothing here: nlohmann already serializes the underlying
@@ -87,6 +92,7 @@
 #include <commons/json/icon.hpp>
 #include <commons/json/id.hpp>
 #include <commons/json/identity.hpp>
+#include <commons/json/lifecycle.hpp>
 #include <commons/json/metadata.hpp>
 #include <commons/json/optional.hpp>
 #include <commons/json/origin.hpp>

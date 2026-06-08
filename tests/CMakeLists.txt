@@ -12,6 +12,7 @@ set(_commons_test_sources
     test_audit_record.cpp
     test_change_audit_record.cpp
     test_audit_records.cpp
+    test_lifecycle.cpp
     test_literals.cpp
     test_display_info.cpp
     test_flag.cpp
@@ -32,7 +33,7 @@ set(_commons_test_sources
 )
 
 if(COMMONS_WITH_NLOHMANN_JSON AND TARGET nlohmann_json::nlohmann_json)
-    list(APPEND _commons_test_sources test_json.cpp test_metadata_json.cpp)
+    list(APPEND _commons_test_sources test_json.cpp test_metadata_json.cpp test_lifecycle_json.cpp)
 endif()
 
 add_executable(commons_tests ${_commons_test_sources})

@@ -13,6 +13,7 @@ commons_test_sources = [
     'test_audit_record.cpp',
     'test_change_audit_record.cpp',
     'test_audit_records.cpp',
+    'test_lifecycle.cpp',
     'test_literals.cpp',
     'test_display_info.cpp',
     'test_flag.cpp',
@@ -35,6 +36,7 @@ commons_test_sources = [
 if commons_with_json
     commons_test_sources += 'test_json.cpp'
     commons_test_sources += 'test_metadata_json.cpp'
+    commons_test_sources += 'test_lifecycle_json.cpp'
 endif
 
 commons_tests = executable('commons_tests',

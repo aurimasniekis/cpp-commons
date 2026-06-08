@@ -448,6 +448,44 @@ within-capacity log round-trips exactly). The millisecond encoding truncates
 sub-millisecond ticks, so use ms-aligned timestamps when an exact round-trip
 matters.
 
+### `comms::Lifecycle` family
+
+A small family for the **status history** of an object — a status, a chain of
+transitions, per-status reports, and a timeline that owns the history and
+notifies subscribers. It follows the value-and-template style of `AuditRecord`
+(generic `T`, no registry/`kind()`/CRTP), not the open-set style of `IReason`.
+
+`comms::LifecycleStatus` is the built-in string-valued status (a thin named value
+that compares and orders by name, with `to_string`/`operator<<`/`std::formatter`/
+`std::hash`). `comms::StatusTransition<T>` is a self-contained transition event —
+the new `status` and its `timestamp`, plus the `previous` status and its
+timestamp (each `std::optional`, absent for the first), so `duration()` works
+without a raw-pointer linked list. `comms::StatusReport<T>` is a per-status period
+summary (time spent in the status, and the total since the timeline start).
+
+`comms::StatusTransitionTimeline<T>` (with `T` defaulting to `LifecycleStatus` and
+constrained by the `StatusType` concept — default-constructible, copyable,
+equality-comparable) owns the transition history. `transition_to(status[, at])`
+appends an event (timestamp defaults to `now()`) and returns it; the status
+accessors (`current_status`/`first_status`/`current_transition`/…) throw
+`comms::LifecycleError` on an empty timeline, while the temporal queries
+(`status_duration`, `status_timestamp`, `current_status_duration`,
+`duration_between`, `total_duration`) return `std::optional` (`nullopt` when
+empty). `status_reports()` returns one `StatusReport<T>` per transition. The
+timeline is **unbounded** (every transition is kept). `subscribe(fn)` /
+`subscribe(status, fn)` register listeners (the latter status-filtered) and return
+an id for `unsubscribe(id)` / `unsubscribe_all()`; listeners fire after each
+`transition_to`. The timeline is **thread-safe** via an internal `std::mutex`, so
+it is **non-copyable / non-movable** (the small value types above are not
+affected); listeners are notified after the lock is released, so a listener may
+safely re-enter the timeline.
+
+JSON (when `COMMONS_WITH_NLOHMANN_JSON` is on): a `LifecycleStatus` is a plain
+string, `StatusTransition<T>` / `StatusReport<T>` are objects (timestamps and
+durations as milliseconds, optional `previous` fields omitted when absent), and a
+timeline is a JSON array of transitions (subscribers are transient and not
+serialized).
+
 ## Common usage patterns
 
 ### Working with colors
@@ -909,6 +947,33 @@ int main() {
 }
 ```
 
+### Tracking lifecycle status
+
+```cpp
+#include <commons/lifecycle.hpp>
+
+#include <iostream>
+
+int main() {
+    namespace c = comms;
+
+    // Start at an initial status (timestamp defaults to now()), then transition.
+    c::StatusTransitionTimeline<> tl{c::LifecycleStatus{"open"}};
+
+    // Subscribe to every change; subscribe(status, fn) filters to one status.
+    tl.subscribe([](const c::StatusTransition<>& tr) {
+        std::cout << "-> " << tr.status << "\n";
+    });
+
+    tl.transition_to(c::LifecycleStatus{"review"});
+    tl.transition_to(c::LifecycleStatus{"closed"});
+
+    std::cout << tl.current_status() << "\n";              // closed
+    std::cout << tl.status_reports().size() << " stages\n";  // 3 stages
+    // current_status() throws comms::LifecycleError on an empty timeline.
+}
+```
+
 ### JSON serialization (optional)
 
 With nlohmann/json available, every public type gains `to_json`/`from_json`.
@@ -960,7 +1025,10 @@ throws) and per-field work in gated virtual `write_json`/`read_json` hooks so a
 sub-kind extends the JSON by overriding them; `AuditRecord` ⇄ an object with
 `identity` + millisecond `timestamp` and the optional fields omitted when
 absent/empty, `ChangeAuditRecord<T>` adds `before`/`after`, and
-`AuditLog<Record>` ⇄ a JSON array of records (capacity is not serialized).
+`AuditLog<Record>` ⇄ a JSON array of records (capacity is not serialized);
+`LifecycleStatus` ⇄ a string, `StatusTransition<T>`/`StatusReport<T>` ⇄ objects
+(millisecond timestamps/durations, optional `previous` fields omitted), and
+`StatusTransitionTimeline<T>` ⇄ a JSON array of transitions.
 
 ## Error handling
 
@@ -1058,6 +1126,7 @@ synchronized; treat concurrent mutation as unsafe.
 | `commons/ability.hpp`            | `comms::IAbility`/`AbilityPtr`, the `AbilityKind<FixedString, Derived>` CRTP base, built-in `Role`/`RecordPermission`/`Generic`/`Unknown` abilities, `GlobalAbilityRegistry`, `make_ability`, `COMMONS_DEFINE_ABILITY`/`COMMONS_REGISTER_ABILITY`.             |
 | `commons/identity.hpp`           | `comms::IIdentity`/`IdentityPtr`, the `IdentityKind<FixedString, Derived>` CRTP base, built-in `User`/`Server`/`ApiClient`/`Unknown`/`Root`/`No` identities, `GlobalIdentityRegistry`, `make_identity`, `COMMONS_DEFINE_IDENTITY`/`COMMONS_REGISTER_IDENTITY`. |
 | `commons/audit_record.hpp`       | `comms::AuditRecord`, `ChangeAuditRecord<T>`, the capped `AuditLog<Record>` (and the `AuditRecords` / `ChangeAuditRecords<T>` aliases); the `COMMONS_AUDIT_RECORDS_CAPACITY` capacity seam.                                                                    |
+| `commons/lifecycle.hpp`          | `comms::LifecycleStatus`, `StatusTransition<T>`, `StatusReport<T>`, the thread-safe `StatusTransitionTimeline<T>` (transitions, temporal queries, reports, subscriptions), and the `LifecycleError` exception.                                                 |
 | `commons/metadata.hpp`           | `comms::md::Value`/`Array`/`Object` (and the `comms::Metadata` root alias) — a dynamic value tree with path lookup, deep merge, hashing, and `operator<<`/`std::format`; `MetadataError` family.                                                               |
 | `commons/config.hpp`             | The `COMMONS_WITH_*` feature-gate macros.                                                                                                                                                                                                                      |
 | `commons/json.hpp`               | Optional nlohmann/json hooks (inert unless the dependency is present). A thin umbrella over per-type modules in `commons/json/<name>.hpp`.                                                                                                                     |
@@ -1079,6 +1148,7 @@ Each example is a self-contained program under `examples/`.
 | `examples/id.cpp`                   | The `Id<Tag, Repr>` macros, `display_string`, inherited formatter specs, and the ULID repr.                                         |
 | `examples/identity_ability.cpp`     | `required.allowed(subject)` for roles and record permissions, an identity holding abilities, and `Root`/`No` identities.            |
 | `examples/audit_record.cpp`         | `AuditRecord` fields and id helpers, `ChangeAuditRecord<T>` before/after, and the capped `AuditLog`.                                |
+| `examples/lifecycle.cpp`            | `StatusTransitionTimeline` transitions, status/temporal queries, reports, subscriptions, and a custom (enum) status type.           |
 | `examples/metadata/`                | The `comms::md` tree: `basic`, `object_helpers`, `nested`, `merge`, `path_lookup`, `format_output`, and `json_integration` (gated). |
 | `examples/json_integration.cpp`     | The optional nlohmann/json round-trips (requires the integration).                                                                  |
 | `examples/consumers/fetch_content/` | A standalone downstream project that pulls `commons` via FetchContent.                                                              |
@@ -1121,9 +1191,11 @@ under Meson.
 `std::nullopt`. The `from` factory on `Icon` throws instead, and the `_color`
 literal fails to compile.
 
-**Can I use it in multiple threads?** Thread safety is not documented. The plain
-value types are safe to read concurrently; the registries and the mutable
-collections are not synchronized.
+**Can I use it in multiple threads?** Mostly not synchronized. The plain value
+types are safe to read concurrently; the registries and the mutable collections
+are not synchronized. The one exception is `StatusTransitionTimeline<T>`, which
+guards its state with an internal `std::mutex` (and is therefore non-copyable /
+non-movable).
 
 **Does `FixedString` own its characters?** Yes — it stores them inline. `view()`
 returns a `std::string_view` into that storage, so do not let the view outlive

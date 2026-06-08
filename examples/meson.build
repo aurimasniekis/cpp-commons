@@ -7,6 +7,7 @@ commons_examples = {
     'commons_id': 'id.cpp',
     'commons_identity_ability': 'identity_ability.cpp',
     'commons_audit_record': 'audit_record.cpp',
+    'commons_lifecycle': 'lifecycle.cpp',
     'commons_metadata_basic': 'metadata/basic.cpp',
     'commons_metadata_object_helpers': 'metadata/object_helpers.cpp',
     'commons_metadata_nested': 'metadata/nested.cpp',

@@ -18,6 +18,7 @@
 #include <commons/icon.hpp>
 #include <commons/id.hpp>
 #include <commons/identity.hpp>
+#include <commons/lifecycle.hpp>
 #include <commons/literals.hpp>
 #include <commons/metadata.hpp>
 #include <commons/origin.hpp>
