@@ -14,6 +14,7 @@ set(_commons_test_sources
     test_audit_records.cpp
     test_lifecycle.cpp
     test_literals.cpp
+    test_lock_free_queue.cpp
     test_display_info.cpp
     test_flag.cpp
     test_origin.cpp
@@ -38,14 +39,25 @@ endif()
 
 add_executable(commons_tests ${_commons_test_sources})
 
+# LockFreeQueue's concurrency tests need a threading runtime.
+find_package(Threads REQUIRED)
+
 target_link_libraries(commons_tests
     PRIVATE
         commons::commons
         GTest::gtest_main
+        Threads::Threads
 )
+
+# On x86-64, -mcx16 makes the Dynamic mode's 16-byte tagged-pointer atomic
+# lock-free (cmpxchg16b) so the tests exercise it on the lock-free path.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" AND NOT MSVC)
+    target_compile_options(commons_tests PRIVATE -mcx16)
+endif()
 
 commons_set_warnings(commons_tests PRIVATE)
 commons_enable_sanitizers(commons_tests)
+commons_enable_tsan(commons_tests)
 commons_enable_coverage(commons_tests)
 
 gtest_discover_tests(commons_tests)

@@ -15,6 +15,7 @@ commons_test_sources = [
     'test_audit_records.cpp',
     'test_lifecycle.cpp',
     'test_literals.cpp',
+    'test_lock_free_queue.cpp',
     'test_display_info.cpp',
     'test_flag.cpp',
     'test_origin.cpp',
@@ -39,9 +40,18 @@ if commons_with_json
     commons_test_sources += 'test_lifecycle_json.cpp'
 endif
 
+# LockFreeQueue's concurrency tests need a threading runtime; on x86-64 -mcx16
+# makes the Dynamic mode's 16-byte tagged-pointer atomic lock-free (cmpxchg16b).
+commons_threads_dep = dependency('threads')
+commons_test_args = []
+if host_machine.cpu_family() == 'x86_64' and meson.get_compiler('cpp').get_id() != 'msvc'
+    commons_test_args += '-mcx16'
+endif
+
 commons_tests = executable('commons_tests',
     sources: commons_test_sources,
-    dependencies: [commons_dep, gtest_dep, gtest_main_dep],
+    dependencies: [commons_dep, gtest_dep, gtest_main_dep, commons_threads_dep],
+    cpp_args: commons_test_args,
 )
 
 test('commons', commons_tests, protocol: 'gtest')

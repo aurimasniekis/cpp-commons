@@ -27,6 +27,7 @@ help:
 	@echo "  make all               configure + build + test"
 	@echo ""
 	@echo "  make sanitize          Configure+build+test in build-san/ with ASan+UBSan"
+	@echo "  make sanitize-tsan     Configure+build+test in build-tsan/ with ThreadSanitizer"
 	@echo "  make tidy              Configure+build in build-tidy/ with clang-tidy"
 	@echo "  make tidy-fix          Like tidy, but let clang-tidy apply fixes in place"
 	@echo "  make release           Configure+build in build-release/ (Release)"
@@ -36,7 +37,7 @@ help:
 	@echo "  make format            Run clang-format -i over project sources"
 	@echo "  make format-check      Verify formatting without writing"
 	@echo ""
-	@echo "  make ci                Run the full pre-push gate: format-check + tidy + test + sanitize + release + integrations"
+	@echo "  make ci                Run the full pre-push gate: format-check + tidy + test + sanitize + sanitize-tsan + release + integrations"
 	@echo ""
 	@echo "  make clean             Remove $(BUILD_DIR)/"
 	@echo "  make distclean         Remove all build-* directories"
@@ -91,7 +92,7 @@ integrations:
 all: test
 
 .PHONY: ci
-ci: format-check tidy test sanitize release integrations
+ci: format-check tidy test sanitize sanitize-tsan release integrations
 	@echo ""
 	@echo "ci: all checks passed"
 
@@ -100,6 +101,14 @@ sanitize:
 	$(CMAKE) -S . -B build-san $(CMAKE_GEN_FLAG) -DCMAKE_BUILD_TYPE=Debug -DCOMMONS_ENABLE_SANITIZERS=ON
 	$(CMAKE) --build build-san -j $(JOBS)
 	$(CTEST) --test-dir build-san --output-on-failure
+
+# ThreadSanitizer — proves data-race freedom for the lock-free atomics, which
+# ASan/UBSan cannot. Mutually exclusive with ASan, hence its own build dir.
+.PHONY: sanitize-tsan
+sanitize-tsan:
+	$(CMAKE) -S . -B build-tsan $(CMAKE_GEN_FLAG) -DCMAKE_BUILD_TYPE=Debug -DCOMMONS_ENABLE_TSAN=ON
+	$(CMAKE) --build build-tsan -j $(JOBS)
+	$(CTEST) --test-dir build-tsan --output-on-failure
 
 .PHONY: tidy
 tidy:
@@ -159,4 +168,4 @@ clean:
 
 .PHONY: distclean
 distclean:
-	rm -rf build build-san build-tidy build-release build-coverage build-docs build-integrations cmake-build-*
+	rm -rf build build-san build-tsan build-tidy build-release build-coverage build-docs build-integrations cmake-build-*

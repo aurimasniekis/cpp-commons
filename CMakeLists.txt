@@ -26,6 +26,7 @@ option(COMMONS_BUILD_DOCS          "Build Doxygen API documentation"      OFF)
 option(COMMONS_ENABLE_CLANG_TIDY   "Run clang-tidy during build"          OFF)
 option(COMMONS_CLANG_TIDY_FIX      "Let clang-tidy apply fixes in place"  OFF)
 option(COMMONS_ENABLE_SANITIZERS   "Build with ASan + UBSan (Debug)"      OFF)
+option(COMMONS_ENABLE_TSAN         "Build with ThreadSanitizer (Debug)"   OFF)
 option(COMMONS_ENABLE_COVERAGE     "Build with Clang source-based coverage" OFF)
 option(COMMONS_WARNINGS_AS_ERRORS  "Treat compiler warnings as errors"    ${PROJECT_IS_TOP_LEVEL})
 option(COMMONS_INSTALL             "Generate install rules for commons"   ${PROJECT_IS_TOP_LEVEL})
@@ -46,6 +47,9 @@ set(COMMONS_PRIORITIZED_DEFAULT_PRIORITY   "" CACHE STRING "Override comms::Prio
 
 # Override seam for comms::AuditLog's default capacity (same shape as above).
 set(COMMONS_AUDIT_RECORDS_CAPACITY         "" CACHE STRING "Override comms::AuditLog default capacity")
+
+# Override seam for comms::LockFreeQueue's fixed-mode default capacity.
+set(COMMONS_LOCK_FREE_QUEUE_DEFAULT_CAPACITY "" CACHE STRING "Override comms::LockFreeQueue default capacity")
 
 include(CompilerWarnings)
 include(Sanitizers)
@@ -88,7 +92,8 @@ foreach(_v
     COMMONS_PRIORITIZED_HIGHEST_PRECEDENCE
     COMMONS_PRIORITIZED_LOWEST_PRECEDENCE
     COMMONS_PRIORITIZED_DEFAULT_PRIORITY
-    COMMONS_AUDIT_RECORDS_CAPACITY)
+    COMMONS_AUDIT_RECORDS_CAPACITY
+    COMMONS_LOCK_FREE_QUEUE_DEFAULT_CAPACITY)
     if(NOT "${${_v}}" STREQUAL "")
         target_compile_definitions(commons INTERFACE ${_v}=${${_v}})
     endif()

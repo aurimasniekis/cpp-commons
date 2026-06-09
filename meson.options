@@ -12,3 +12,6 @@ option('prioritized_default_priority',   type: 'string', value: '', description:
 
 # Override seam for comms::AuditLog's default capacity (same shape as above).
 option('audit_records_capacity',         type: 'string', value: '', description: 'Override comms::AuditLog default capacity')
+
+# Override seam for comms::LockFreeQueue's fixed-mode default capacity.
+option('lock_free_queue_default_capacity', type: 'string', value: '', description: 'Override comms::LockFreeQueue default capacity')

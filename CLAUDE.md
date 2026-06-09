@@ -241,6 +241,36 @@ and an `AuditLog` is a JSON array (capacity is **not** serialized — a log read
 under a smaller cap keeps the newest N). Pulling in `<commons/id.hpp>` for the
 helpers does not force ulid (still gated by `COMMONS_WITH_ULID`).
 
+`comms::LockFreeQueue<T, Mode>` (`lock_free_queue.hpp`) is the **first
+`std::atomic`-based type** — a lock-free MPMC FIFO built as a Michael–Scott
+linked-list queue with a node freelist and ABA-safe tagged links. `T` must
+satisfy the `comms::LockFreeValue` concept (trivially copyable/destructible,
+nothrow copy/move constructible — the element restriction a lock-free node pool
+needs, made explicit). `Mode` (a `LockFreeQueueMode`) selects the
+strategy, factored into a `detail` storage policy that the shared push/pop logic
+sits on top of: `Fixed` is fully portable (nodes in one preallocated array,
+links a `std::atomic<comms::u64>` packing a 32-bit slot index + 32-bit tag, no
+DWCAS — `push` returns `false` when full) and `Dynamic` (the default) is
+unbounded (heap nodes recycled through a lock-free freelist,
+links a 16-byte `std::atomic<TaggedPtr>` updated by 128-bit DWCAS — lock-free
+natively on arm64, but on x86-64 only with `-mcx16`, else a correct hidden-lock
+fallback; `is_lock_free()` reports the truth at runtime). The element is carried
+through a `std::atomic<T>` accessed `relaxed` (ordering rides the link CAS) so
+the consumer's read-before-validating-CAS is well-defined rather than a benign
+data race — which is what keeps it clean under ThreadSanitizer. The guarantee: a
+value successfully `push`ed *happens-before* the `pop` that returns it; `empty()`
+is a racy best-effort snapshot and there is deliberately no exact `size()`. The
+API is `push(const T&)` / `push(T&&)` / `emplace(args...)` (all `-> bool`,
+`false` = full/alloc-failed) and `pop(T&)` / `try_pop() -> std::optional<T>`
+(`pop` and `try_pop` both return the value, never a reference — a popped node may
+be recycled immediately). It is **not** a `std::queue` (no `front`/`back`/`size`,
+those can't be made race-safe here) and exposes no iterators, so it is not a
+range. The queue owns atomics + a node pool, so it is non-copyable and
+non-movable (mirrors
+`StatusTransitionTimeline` in `lifecycle.hpp`). Its fixed-mode default capacity
+is the `COMMONS_LOCK_FREE_QUEUE_DEFAULT_CAPACITY` value-override seam (default
+1024). It ships **no JSON** — a deliberate exception (see below).
+
 ## Feature gates (live in `commons/config.hpp`)
 
 Each optional integration is a `COMMONS_WITH_*` macro resolving to `1`/`0`:
@@ -274,7 +304,11 @@ build only emits a `-D` when a concrete override is supplied: CMake via a cache
 directly. The `COMMONS_AUDIT_RECORDS_CAPACITY` macro (in `audit_record.hpp`,
 overriding `comms::AuditLog`'s default capacity — default 3) is wired the same
 way (CMake `-DCOMMONS_AUDIT_RECORDS_CAPACITY=5`, Meson
-`-Daudit_records_capacity=5`), but its C++ default *is* a concrete literal.
+`-Daudit_records_capacity=5`), but its C++ default *is* a concrete literal. The
+`COMMONS_LOCK_FREE_QUEUE_DEFAULT_CAPACITY` macro (in `lock_free_queue.hpp`,
+overriding `comms::LockFreeQueue`'s fixed-mode default capacity — default 1024)
+is wired identically (CMake `-DCOMMONS_LOCK_FREE_QUEUE_DEFAULT_CAPACITY=2048`,
+Meson `-Dlock_free_queue_default_capacity=2048`).
 
 ## The rule for every public type
 
@@ -297,7 +331,13 @@ When adding a type, also add, guarded by the matching macro:
   overriding; the matching `commons/json/<name>.hpp` then only holds the
   `adl_serializer<…Ptr>` glue. Do this only for a polymorphic open set that
   genuinely needs subclass-extensible JSON, and document the vtable/uniform-gate
-  caveat.
+  caveat. A second, narrower *exception* is a type for which JSON is
+  **deliberately omitted**: `lock_free_queue.hpp` ships none, because a
+  concurrent queue is mutable shared state — a snapshot is racy and a round-trip
+  meaningless — so there is no `commons/json/lock_free_queue.hpp` and the
+  umbrella is untouched. This follows the precedent that `lifecycle.hpp` keeps
+  JSON on its value records, not on the synchronizing object; document the
+  omission in the type's `/// @brief`.
 
 Then: register the type's tests in `tests/CMakeLists.txt` + `tests/meson.build`
 (append the integration test under the `COMMONS_WITH_*` / `commons_with_*`

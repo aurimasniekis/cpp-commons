@@ -20,6 +20,7 @@
 #include <commons/identity.hpp>
 #include <commons/lifecycle.hpp>
 #include <commons/literals.hpp>
+#include <commons/lock_free_queue.hpp>
 #include <commons/metadata.hpp>
 #include <commons/origin.hpp>
 #include <commons/prioritized.hpp>
