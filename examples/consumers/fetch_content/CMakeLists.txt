@@ -15,15 +15,15 @@ include(FetchContent)
 # Pin the published release tarball + its SHA256. Reproducible, no git required
 # at configure time, fastest to fetch on CI. To recompute the SHA256 yourself:
 #
-#   curl -sL https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.7.tar.gz \
+#   curl -sL https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.8.tar.gz \
 #     | shasum -a 256
 #
 # (The CI consumer job overrides the source dir with the in-tree checkout, so
 # this snippet is also exercised without hitting the network. See README.md.)
 FetchContent_Declare(
         cpp-commons
-        URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.7.tar.gz
-        URL_HASH SHA256=6b878325f9e84f4079daef5e8ca71cf610b220e4051abff3809a6f2af138db34
+        URL      https://github.com/aurimasniekis/cpp-commons/archive/refs/tags/v0.1.8.tar.gz
+        URL_HASH SHA256=<filled-in-after-tagging-v0.1.8>
 )
 
 # Local-validation tip: to test this snippet against an in-tree checkout,

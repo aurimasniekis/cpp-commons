@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(commons
-    VERSION     0.1.7
+    VERSION     0.1.8
     DESCRIPTION "Header-only C++23 library of common/shared types for the C++ libraries"
     LANGUAGES   CXX
 )
@@ -76,6 +76,40 @@ target_include_directories(commons
 )
 
 target_compile_features(commons INTERFACE cxx_std_23)
+
+# comms::LockFreeQueue's Dynamic mode uses a 16-byte std::atomic<TaggedPtr> (and
+# std::atomic<T> for a 16-byte T). On some toolchains — notably GCC on x86-64,
+# where the __atomic_*_16 entry points are out-of-line — these resolve from
+# libatomic, so a bare link fails with undefined references. Probe for it and
+# link libatomic transitively (the INTERFACE target propagates it to every
+# consumer compiling that path). On macOS/arm64 the ops are inline lock-free and
+# no extra library is needed, so the probe links unaided and nothing is added.
+include(CheckCXXSourceCompiles)
+set(_commons_dwcas_probe [=[
+#include <atomic>
+#include <cstdint>
+struct Big { void* a; std::uintptr_t b; };
+int main() {
+    std::atomic<Big> g;
+    Big v{};
+    g.store(v);
+    Big e = g.load();
+    return g.compare_exchange_strong(e, v) ? 0 : 1;
+}
+]=])
+check_cxx_source_compiles("${_commons_dwcas_probe}" COMMONS_DWCAS_LINKS_UNAIDED)
+if(NOT COMMONS_DWCAS_LINKS_UNAIDED)
+    set(CMAKE_REQUIRED_LIBRARIES atomic)
+    check_cxx_source_compiles("${_commons_dwcas_probe}" COMMONS_DWCAS_NEEDS_LIBATOMIC)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    if(COMMONS_DWCAS_NEEDS_LIBATOMIC)
+        target_link_libraries(commons INTERFACE atomic)
+    else()
+        message(WARNING
+            "commons: 16-byte atomics link with neither the bare toolchain nor "
+            "-latomic; comms::LockFreeQueue Dynamic mode may fail to link here.")
+    endif()
+endif()
 
 if(COMMONS_WITH_NLOHMANN_JSON AND TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(commons INTERFACE nlohmann_json::nlohmann_json)

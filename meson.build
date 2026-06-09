@@ -1,5 +1,5 @@
 project('commons', 'cpp',
-    version: '0.1.7',
+    version: '0.1.8',
     license: 'MIT',
     default_options: [
         'cpp_std=c++23',
@@ -50,6 +50,33 @@ foreach optname, macroname : prioritized_overrides
         add_project_arguments('-D' + macroname + '=' + optval, language: 'cpp')
     endif
 endforeach
+
+# comms::LockFreeQueue's Dynamic mode uses a 16-byte std::atomic<TaggedPtr> (and
+# std::atomic<T> for a 16-byte T). On toolchains where the __atomic_*_16 entry
+# points are out-of-line (notably GCC/x86-64) these resolve from libatomic, so a
+# bare link fails; probe for it and add libatomic transitively. On macOS/arm64
+# the ops are inline lock-free and the bare link succeeds, so nothing is added.
+cc = meson.get_compiler('cpp')
+dwcas_probe = '''
+#include <atomic>
+#include <cstdint>
+struct Big { void* a; std::uintptr_t b; };
+int main() {
+    std::atomic<Big> g;
+    Big v{};
+    g.store(v);
+    Big e = g.load();
+    return g.compare_exchange_strong(e, v) ? 0 : 1;
+}
+'''
+if not cc.links(dwcas_probe, name: '16-byte atomics without libatomic')
+    libatomic = cc.find_library('atomic', required: false)
+    if libatomic.found() and cc.links(dwcas_probe, dependencies: libatomic, name: '16-byte atomics with libatomic')
+        commons_deps += libatomic
+    else
+        warning('16-byte atomics link with neither the bare toolchain nor -latomic; LockFreeQueue Dynamic mode may fail to link here.')
+    endif
+endif
 
 commons_dep = declare_dependency(
     include_directories: commons_inc,

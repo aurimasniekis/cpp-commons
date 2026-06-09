@@ -254,7 +254,10 @@ DWCAS — `push` returns `false` when full) and `Dynamic` (the default) is
 unbounded (heap nodes recycled through a lock-free freelist,
 links a 16-byte `std::atomic<TaggedPtr>` updated by 128-bit DWCAS — lock-free
 natively on arm64, but on x86-64 only with `-mcx16`, else a correct hidden-lock
-fallback; `is_lock_free()` reports the truth at runtime). The element is carried
+fallback; `is_lock_free()` reports the truth at runtime. Those 16-byte ops are
+out-of-line on some toolchains — notably GCC/x86-64 — so CMake and Meson probe at
+configure time and link **libatomic** transitively through `commons::commons`
+when the bare link can't resolve `__atomic_*_16`). The element is carried
 through a `std::atomic<T>` accessed `relaxed` (ordering rides the link CAS) so
 the consumer's read-before-validating-CAS is well-defined rather than a benign
 data race — which is what keeps it clean under ThreadSanitizer. The guarantee: a
@@ -369,7 +372,7 @@ Meson: `meson setup build-meson -Dtests=true -Dexamples=true && meson test -C bu
 - 4-space indent, 100-col, LLVM-based `.clang-format`. Includes regrouped:
   `<commons/...>` first.
 - C++23 required (`cxx_std_23`); `cmake_minimum_required(VERSION 3.25)`.
-- Version `0.1.7` is declared once in CMake `project()` and Meson `project()`.
+- Version `0.1.8` is declared once in CMake `project()` and Meson `project()`.
   `commons/version.hpp` is **generated** from `commons/version.hpp.in` by the
   build (into the build tree, not the source tree): it defines the
   `COMMONS_VERSION_MAJOR/MINOR/PATCH/STRING` macros and the `comms::version` /

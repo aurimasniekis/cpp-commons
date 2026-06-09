@@ -184,6 +184,33 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: make sanitize
 
+  thread-sanitizer:
+    name: ThreadSanitizer (TSan)
+    runs-on: ubuntu-latest
+    env:
+      CC:  gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build gcc-14 g++-14
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v5
+        with:
+          path: build-tsan/_deps
+          key: deps-tsan-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      # Proves data-race freedom for comms::LockFreeQueue's atomics — the key
+      # validation for the library's first std::atomic-based type, which the
+      # ASan + UBSan job above cannot establish. Mutually exclusive with ASan,
+      # hence a separate job and build dir.
+      - name: Configure + build + test under ThreadSanitizer
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: make sanitize-tsan
+
   clang-tidy:
     name: clang-tidy
     # macOS runner: Apple Clang + libc++ ship a working <expected> out of the
